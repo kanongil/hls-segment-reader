@@ -1,0 +1,36 @@
+{
+  "name": "hls-segment-reader",
+  "version": "0.0.0",
+  "description": "Read segments from HLS streams using a Readable",
+  "main": "segment-reader.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "streaming",
+    "live",
+    "video",
+    "audio",
+    "m3u8"
+  ],
+  "author": "Gil Pedersen <gpdev@gpost.dk>",
+  "license": "BSD",
+  "dependencies": {
+    "m3u8parse": "^0.1.16",
+    "oncemore": "^1.0.0",
+    "readable-stream": "^1.0.31",
+    "uristream": "^1.1.0"
+  },
+  "directories": {
+    "test": "test"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanongil/node-hls-segment-reader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kanongil/node-hls-segment-reader/issues"
+  },
+  "homepage": "https://github.com/kanongil/node-hls-segment-reader"
+}
