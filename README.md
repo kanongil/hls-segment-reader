@@ -1,6 +1,6 @@
 # HlsSegmentReader for node.js
 
-Read sequential segments from any [Apple HLS](http://tools.ietf.org/html/draft-pantos-http-live-streaming) source in an object-mode `Readable`.
+Read segments from any [Apple HLS](http://tools.ietf.org/html/draft-pantos-http-live-streaming) source in an object-mode `Readable`.
 
 ## Installation
 
