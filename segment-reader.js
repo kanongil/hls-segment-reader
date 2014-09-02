@@ -248,6 +248,7 @@ HlsSegmentReader.prototype.segmentMimeTypes = [
   'audio/aac',
   'audio/x-aac',
   'audio/ac3',
+  'text/vtt',
 ];
 
 HlsSegmentReader.prototype._read = function(/*n*/) {
