@@ -206,7 +206,9 @@ function HlsSegmentReader(src, options) {
     var stream = UriStream(Url.format(self.url), { timeout:30 * 1000 });
     stream.on('meta', function(meta) {
       // check for valid mime type
-      if (self.indexMimeTypes.indexOf(meta.mime.toLowerCase()) === -1) {
+      if (self.indexMimeTypes.indexOf(meta.mime.toLowerCase()) === -1 &&
+          meta.url.indexOf('.m3u8', meta.url.length - 5) === -1 &&
+          meta.url.indexOf('.m3u', meta.url.length - 4) === -1) {
         // FIXME: correctly handle .m3u us-ascii encoding
         if (stream.abort) stream.abort();
         return stream.emit('error', new Error('Invalid MIME type: ' + meta.mime));
