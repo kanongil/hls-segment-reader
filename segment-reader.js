@@ -239,6 +239,22 @@ function HlsSegmentReader(src, options) {
 }
 Util.inherits(HlsSegmentReader, Readable);
 
+HlsSegmentReader.prototype.destroy = function() {
+  if (!this.readable) return;
+
+  this.readable = false;
+
+  if (this.fetching && !this.fetching.ended && this.fetching.abort)
+    this.fetching.abort();
+
+  for (var seq in this.watch) {
+    var stream = this.watch[seq];
+    delete this.watch[seq];
+    if (!stream.ended && stream.abort)
+      stream.abort();
+  }
+};
+
 HlsSegmentReader.prototype.indexMimeTypes = [
   'application/vnd.apple.mpegurl',
   'application/x-mpegurl',
