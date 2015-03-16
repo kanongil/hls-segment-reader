@@ -58,7 +58,7 @@ function fetchfrom(reader, seqNo, segment, cb) {
 function checknext(reader) {
   var state = reader.readState;
   var index = reader.index;
-  if (!state.active || state.fetching || state.nextSeq === -1 || !index)
+  if (!reader.readable || !state.active || state.fetching || state.nextSeq === -1 || !index)
     return null;
 
   var seq = state.nextSeq;
@@ -76,6 +76,8 @@ function checknext(reader) {
       return reader.push(null);
 
     state.fetching = fetchfrom(reader, seq, segment, function(err, object) {
+      if (!reader.readable) return;
+
       state.fetching = null;
       if (err) reader.emit('error', err);
 
@@ -218,6 +220,8 @@ function HlsSegmentReader(src, options) {
     });
 
     M3U8Parse(stream, { extensions:self.extensions }, function(err, index) {
+      if (!self.readable) return;
+
       if (err) {
         self.emit('error', err);
         updatecheck(false);
@@ -239,21 +243,32 @@ function HlsSegmentReader(src, options) {
 }
 Util.inherits(HlsSegmentReader, Readable);
 
-HlsSegmentReader.prototype.destroy = function() {
+HlsSegmentReader.prototype.abort = function(graceful) {
+  if (!graceful) {
+    // Abort all active streams
+
+    if (this.fetching && !this.fetching.ended && this.fetching.abort)
+      this.fetching.abort();
+
+    for (var seq in this.watch) {
+      var stream = this.watch[seq];
+      delete this.watch[seq];
+      if (!stream.ended && stream.abort)
+        stream.abort();
+    }
+  }
+
   if (!this.readable) return;
 
+  if (!this._readableState.ended)
+    this.push(null);
+
   this.readable = false;
-
-  if (this.fetching && !this.fetching.ended && this.fetching.abort)
-    this.fetching.abort();
-
-  for (var seq in this.watch) {
-    var stream = this.watch[seq];
-    delete this.watch[seq];
-    if (!stream.ended && stream.abort)
-      stream.abort();
-  }
 };
+
+HlsSegmentReader.prototype.destroy = function() {
+  return this.abort();
+}
 
 HlsSegmentReader.prototype.indexMimeTypes = [
   'application/vnd.apple.mpegurl',
