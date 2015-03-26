@@ -14,18 +14,24 @@ var Readable = require('readable-stream');
 var exports = module.exports = HlsSegmentReader;
 exports.HlsSegmentObject = HlsSegmentObject;
 
-function HlsSegmentObject(seq, segment, meta, stream) {
+function HlsSegmentObject(seq, segment, fileMeta, stream) {
   this.seq = seq;
-  this.segment = segment;
-  this.meta = meta;
+  this.details = segment;
+  this.file = fileMeta;
   this.stream = stream;
 }
 
 function fetchfrom(reader, seqNo, segment, cb) {
   var segmentUrl = Url.resolve(reader.baseUrl, segment.uri);
-  var probe = !!reader.noData;
+  var probe = !reader.withData;
 
-  var stream = UriStream(segmentUrl, { probe:probe, highWaterMark:100 * 1000 * 1000 });
+  var streamOptions = { probe:probe, highWaterMark:100 * 1000 * 1000 };
+  if (segment.byterange) {
+    streamOptions.start = segment.byterange.offset;
+    streamOptions.end = segment.byterange.offset + segment.byterange.length - 1;
+  }
+
+  var stream = UriStream(segmentUrl, streamOptions);
 
   function finish(err, res) {
     stream.removeListener('meta', onmeta);
@@ -37,10 +43,10 @@ function fetchfrom(reader, seqNo, segment, cb) {
   function onmeta(meta) {
     if (reader.segmentMimeTypes.indexOf(meta.mime.toLowerCase()) === -1) {
       if (stream.abort) stream.abort();
-      return stream.emit(new Error('Unsupported segment MIME type: ' + meta.mime));
+      return stream.emit('error', new Error('Unsupported segment MIME type: ' + meta.mime));
     }
 
-    finish(null, new HlsSegmentObject(seqNo, segment, meta, stream));
+    finish(null, new HlsSegmentObject(seqNo, segment, meta, probe ? null : stream));
   }
 
   function onfail(err) {
@@ -85,10 +91,12 @@ function checknext(reader) {
         state.nextSeq++;
 
       if (object) {
-        reader.watch[object.seq] = object.stream;
-        Oncemore(object.stream).once('end', 'error', function() {
-          delete reader.watch[object.seq];
-        });
+        if (object.stream) {
+          reader.watch[object.seq] = object.stream;
+          Oncemore(object.stream).once('end', 'error', function() {
+            delete reader.watch[object.seq];
+          });
+        }
 
         state.active = reader.push(object);
       }
@@ -119,7 +127,7 @@ function HlsSegmentReader(src, options) {
   this.baseUrl = src;
 
   this.fullStream = !!options.fullStream;
-  this.noData = !!options.noData;
+  this.withData = !!options.withData;
 
   // dates are inclusive
   this.startDate = options.startDate ? new Date(options.startDate) : null;
@@ -158,7 +166,7 @@ function HlsSegmentReader(src, options) {
   function initialSeqNo() {
     var index = self.index;
 
-    if (self.startDate)
+    if (!self.fullStream && self.startDate)
       return index.seqNoForDate(self.startDate, true);
     else
       return index.startSeqNo(self.fullStream);
