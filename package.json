@@ -14,7 +14,7 @@
     "m3u8"
   ],
   "author": "Gil Pedersen <gpdev@gpost.dk>",
-  "license": "BSD",
+  "license": "BSD-2-Clause",
   "dependencies": {
     "m3u8parse": "^0.1.17",
     "oncemore": "^1.0.0",

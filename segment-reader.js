@@ -25,7 +25,7 @@ function fetchfrom(reader, seqNo, segment, cb) {
   var segmentUrl = Url.resolve(reader.baseUrl, segment.uri);
   var probe = !reader.withData;
 
-  var streamOptions = { probe:probe, highWaterMark:100 * 1000 * 1000 };
+  var streamOptions = { probe: probe, highWaterMark: 100 * 1000 * 1000 };
   if (segment.byterange) {
     streamOptions.start = segment.byterange.offset;
     streamOptions.end = segment.byterange.offset + segment.byterange.length - 1;
@@ -213,7 +213,7 @@ function HlsSegmentReader(src, options) {
   function updateindex() {
     if (!self.readable) return;
 
-    var stream = UriStream(Url.format(self.url), { timeout:30 * 1000 });
+    var stream = UriStream(Url.format(self.url), { timeout: 30 * 1000 });
     stream.on('meta', function(meta) {
       // check for valid mime type
       if (self.indexMimeTypes.indexOf(meta.mime.toLowerCase()) === -1 &&
@@ -227,7 +227,7 @@ function HlsSegmentReader(src, options) {
       self.baseUrl = meta.url;
     });
 
-    M3U8Parse(stream, { extensions:self.extensions }, function(err, index) {
+    M3U8Parse(stream, { extensions: self.extensions }, function(err, index) {
       if (!self.readable) return;
 
       if (err) {
@@ -245,7 +245,7 @@ function HlsSegmentReader(src, options) {
     });
   }
 
-  Readable.call(this, { objectMode:true, highWaterMark:options.highWaterMark || 0 });
+  Readable.call(this, { objectMode: true, highWaterMark: options.highWaterMark || 0 });
 
   updateindex();
 }
