@@ -39,9 +39,7 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
     var onmeta = function (meta) {
 
         if (reader.segmentMimeTypes.indexOf(meta.mime.toLowerCase()) === -1) {
-            if (stream.abort) {
-                stream.abort();
-            }
+            stream.abort();
             return stream.emit('error', new Error('Unsupported segment MIME type: ' + meta.mime));
         }
 
@@ -50,7 +48,7 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
 
     var onfail = function (err) {
 
-        if (!err) {
+        if (!err) {     // defensive programming
             err = new Error('No metadata');
         }
 
@@ -83,7 +81,8 @@ internals.checkNext = function checknext (reader) {
             state.discont = false;
         }
 
-        // check if we need to stop
+        // Check if we need to stop
+
         if (reader.stopDate && segment.program_time > reader.stopDate) {
             return reader.push(null);
         }
@@ -209,7 +208,7 @@ var HlsSegmentReader = function (src, options) {
 
             var abortStream = function (stream) {
 
-                if (!stream.ended && stream.abort) {
+                if (!stream._readableState.ended) {
                     stream.abort();
                 }
             };
@@ -235,7 +234,7 @@ var HlsSegmentReader = function (src, options) {
         if (self.index && !self.index.ended && self.readable) {
             var updateInterval = getUpdateInterval(updated);
             if (updateInterval <= 0) {
-                return self.emit('error', new Error('index stall'));
+                return self.emit('error', new Error('Index update stalled'));
             }
 
             setTimeout(updateindex, Math.max(1, updateInterval) * 1000);
@@ -258,9 +257,7 @@ var HlsSegmentReader = function (src, options) {
                     meta.url.indexOf('.m3u', meta.url.length - 4) === -1) {
 
                 // FIXME: correctly handle .m3u us-ascii encoding
-                if (stream.abort) {
-                    stream.abort();
-                }
+                stream.abort();
 
                 return stream.emit('error', new Error('Invalid MIME type: ' + meta.mime));
             }
@@ -302,14 +299,15 @@ HlsSegmentReader.prototype.abort = function (graceful) {
 
         // Abort all active streams
 
-        if (this.fetching && !this.fetching.ended && this.fetching.abort) {
-            this.fetching.abort();
+        var state = this.readState;
+        if (state.fetching && !state.fetching._readableState.ended) {
+            state.fetching.abort();
         }
 
         for (var seq in this.watch) {
             var stream = this.watch[seq];
             delete this.watch[seq];
-            if (!stream.ended && stream.abort) {
+            if (!stream._readableState.ended) {
                 stream.abort();
             }
         }

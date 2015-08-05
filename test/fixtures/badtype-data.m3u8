@@ -1,0 +1,5 @@
+#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXTINF:4.000,
+data:video/x-unknown;charset=utf-8,hello
+#EXT-X-ENDLIST

@@ -4,7 +4,8 @@
   "description": "Read segments from HLS streams using a Readable",
   "main": "segment-reader.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "lab -a code -t 90 -L",
+    "test-cov-html": "lab -a code -r html -o coverage.html"
   },
   "keywords": [
     "streaming",
@@ -24,10 +25,18 @@
   "directories": {
     "test": "test"
   },
-  "devDependencies": {},
+  "files": [
+    "README.md",
+    "segment-reader.js"
+  ],
+  "devDependencies": {
+    "code": "^1.5.0",
+    "hapi": "^8.8.1",
+    "lab": "^5.14.1"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kanongil/node-hls-segment-reader.git"
+    "url": "git+https://github.com/kanongil/node-hls-segment-reader.git"
   },
   "bugs": {
     "url": "https://github.com/kanongil/node-hls-segment-reader/issues"
