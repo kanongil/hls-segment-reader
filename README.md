@@ -2,6 +2,8 @@
 
 Read segments from any [Apple HLS](http://tools.ietf.org/html/draft-pantos-http-live-streaming) source in an object-mode `Readable`.
 
+[![Build Status](https://travis-ci.org/kanongil/node-hls-segment-reader.svg?branch=master)](https://travis-ci.org/kanongil/node-hls-segment-reader)
+
 ## API
 
 ### new HlsSegmentReader(uri, [options])

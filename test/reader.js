@@ -4,6 +4,7 @@ var Path = require('path');
 var Readable = require('stream').Readable;
 var Code = require('code');
 var Hapi = require('hapi');
+var Inert = require('inert');
 var Lab = require('lab');
 var M3U8Parse = require('m3u8parse');
 
@@ -32,6 +33,9 @@ describe('HlsSegmentReader()', function () {
     var provisionServer = function () {
 
         var server = new Hapi.Server({ debug: false });
+
+        server.register(Inert, function () {});
+
         server.connection({ routes: { files: { relativeTo: Path.join(__dirname, 'fixtures') } } });
 
         var delay = function (request, reply) {
