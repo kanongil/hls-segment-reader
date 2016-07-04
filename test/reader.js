@@ -1,19 +1,21 @@
-var Crypto = require('crypto');
-var Fs = require('fs');
-var Path = require('path');
-var Readable = require('stream').Readable;
-var Code = require('code');
-var Hapi = require('hapi');
-var Inert = require('inert');
-var Lab = require('lab');
-var M3U8Parse = require('m3u8parse');
+'use strict';
 
-var HlsSegmentReader = require('../segment-reader');
+const Crypto = require('crypto');
+const Fs = require('fs');
+const Path = require('path');
+const Readable = require('stream').Readable;
+const Code = require('code');
+const Hapi = require('hapi');
+const Inert = require('inert');
+const Lab = require('lab');
+const M3U8Parse = require('m3u8parse');
+
+const HlsSegmentReader = require('../segment-reader');
 
 
 // Declare internals
 
-var internals = {
+const internals = {
     checksums: ['c38d0718851a20be2edba13fc1643c1076826c62',
                 '612991f34ae7cc19df5d595a2a4249b8f5d2d3f0',
                 'bc600f4039aae412c4d978b3fd4d608ce4dec59a']
@@ -22,39 +24,39 @@ var internals = {
 
 // Test shortcuts
 
-var lab = exports.lab = Lab.script();
-var describe = lab.describe;
-var it = lab.it;
-var expect = Code.expect;
+const lab = exports.lab = Lab.script();
+const describe = lab.describe;
+const it = lab.it;
+const expect = Code.expect;
 
 
-describe('HlsSegmentReader()', function () {
+describe('HlsSegmentReader()', () => {
 
-    var provisionServer = function () {
+    const provisionServer = () => {
 
-        var server = new Hapi.Server({ debug: false });
+        const server = new Hapi.Server({ debug: false });
 
-        server.register(Inert, function () {});
+        server.register(Inert, () => {});
 
         server.connection({ routes: { files: { relativeTo: Path.join(__dirname, 'fixtures') } } });
 
-        var delay = function (request, reply) {
+        const delay = (request, reply) => {
 
-            setTimeout(function () {
+            setTimeout(() => {
 
                 return reply(200);
             }, 200);
         };
 
-        var slowServe = function (request, reply) {
+        const slowServe = (request, reply) => {
 
-            var slowStream = new Readable();
-            slowStream._read = function () {};
+            const slowStream = new Readable();
+            slowStream._read = () => {};
 
-            var path = Path.join(__dirname, 'fixtures', request.params.path);
-            var buffer = Fs.readFileSync(path);
+            const path = Path.join(__dirname, 'fixtures', request.params.path);
+            const buffer = Fs.readFileSync(path);
             slowStream.push(buffer.slice(0, 5000));
-            setTimeout(function () {
+            setTimeout(() => {
 
                 slowStream.push(buffer.slice(5000));
                 slowStream.push(null);
@@ -66,7 +68,7 @@ describe('HlsSegmentReader()', function () {
         server.route({ method: 'GET', path: '/simple/{path*}', handler: { directory: { path: '.' } } });
         server.route({ method: 'GET', path: '/slow/{path*}', handler: { directory: { path: '.' } }, config: { pre: [{ method: delay, assign: 'delay' }] } });
         server.route({ method: 'GET', path: '/slow-data/{path*}', handler: slowServe });
-        server.route({ method: 'GET', path: '/error', handler: function (request, reply) {
+        server.route({ method: 'GET', path: '/error', handler: (request, reply) => {
 
             reply.code(500);
         } });
@@ -74,25 +76,25 @@ describe('HlsSegmentReader()', function () {
         return server;
     };
 
-    var server;
+    let server;
 
-    lab.before(function (done) {
+    lab.before((done) => {
 
         server = provisionServer();
         server.start(done);
     });
 
-    lab.after(function (done) {
+    lab.after((done) => {
 
         server.stop(done);
     });
 
-    describe('constructor', function () {
+    describe('constructor', () => {
 
-        it('creates valid objects', function (done) {
+        it('creates valid objects', (done) => {
 
-            var r1 = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
-            var r2 = HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
+            const r1 = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
+            const r2 = HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
 
             expect(r1).to.be.instanceOf(HlsSegmentReader);
             expect(r2).to.be.instanceOf(HlsSegmentReader);
@@ -102,9 +104,9 @@ describe('HlsSegmentReader()', function () {
             done();
         });
 
-        it('throws on missing uri option', function (done) {
+        it('throws on missing uri option', (done) => {
 
-            var createObject = function () {
+            const createObject = () => {
 
                 return new HlsSegmentReader();
             };
@@ -113,9 +115,9 @@ describe('HlsSegmentReader()', function () {
             done();
         });
 
-        it('throws on invalid uri option', function (done) {
+        it('throws on invalid uri option', (done) => {
 
-            var createObject = function () {
+            const createObject = () => {
 
                 return new HlsSegmentReader('asdf://test');
             };
@@ -125,22 +127,22 @@ describe('HlsSegmentReader()', function () {
         });
     });
 
-    it('emits error on missing remote host', function (done) {
+    it('emits error on missing remote host', (done) => {
 
-        var r = new HlsSegmentReader('http://does.not.exist/simple/500.m3u8');
+        const r = new HlsSegmentReader('http://does.not.exist/simple/500.m3u8');
 
-        r.on('error', function (err) {
+        r.on('error', (err) => {
 
             expect(err).to.be.instanceOf(Error);
             done();
         });
     });
 
-    it('emits error for missing data', function (done) {
+    it('emits error for missing data', (done) => {
 
-        var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/notfound');
+        const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/notfound');
 
-        r.on('error', function (err) {
+        r.on('error', (err) => {
 
             expect(err).to.be.instanceOf(Error);
             expect(err.message).to.contain('Not Found');
@@ -148,11 +150,11 @@ describe('HlsSegmentReader()', function () {
         });
     });
 
-    it('emits error for http error responses', function (done) {
+    it('emits error for http error responses', (done) => {
 
-        var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/error');
+        const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/error');
 
-        r.on('error', function (err) {
+        r.on('error', (err) => {
 
             expect(err).to.be.instanceOf(Error);
             expect(err.message).to.contain('Internal Server Error');
@@ -160,11 +162,11 @@ describe('HlsSegmentReader()', function () {
         });
     });
 
-    it('emits error on non-index responses', function (done) {
+    it('emits error on non-index responses', (done) => {
 
-        var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.ts');
+        const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.ts');
 
-        r.on('error', function (err) {
+        r.on('error', (err) => {
 
             expect(err).to.be.instanceOf(Error);
             expect(err.message).to.contain('Invalid MIME type');
@@ -172,20 +174,20 @@ describe('HlsSegmentReader()', function () {
         });
     });
 
-    it('emits error on unknown segment mime type', function (done) {
+    it('emits error on unknown segment mime type', (done) => {
 
-        var r1 = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'badtype.m3u8'));
+        const r1 = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'badtype.m3u8'));
 
         r1.resume();
-        r1.on('error', function (err1) {
+        r1.on('error', (err1) => {
 
             expect(err1).to.be.instanceOf(Error);
             expect(err1.message).to.contain('Unsupported segment MIME type');
 
-            var r2 = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'badtype-data.m3u8'));
+            const r2 = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'badtype-data.m3u8'));
 
             r2.resume();
-            r2.on('error', function (err2) {
+            r2.on('error', (err2) => {
 
                 expect(err2).to.be.instanceOf(Error);
                 expect(err2.message).to.contain('Unsupported segment MIME type');
@@ -194,51 +196,51 @@ describe('HlsSegmentReader()', function () {
         });
     });
 
-    it('emits error on malformed index files', function (done) {
+    it('emits error on malformed index files', (done) => {
 
-        var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/malformed.m3u8');
+        const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/malformed.m3u8');
 
-        r.on('error', function (err) {
+        r.on('error', (err) => {
 
             expect(err).to.be.instanceOf(Error);
             done();
         });
     });
 
-    describe('variant index', function () {
+    describe('master index', () => {
 
-        it('does not output any segments', function (done) {
+        it('does not output any segments', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/index.m3u8');
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/index.m3u8');
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 segments.push(segment);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(0);
                 done();
             });
         });
 
-        it('emits "index" event', function (done) {
+        it('emits "index" event', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/index.m3u8');
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/index.m3u8');
 
-            var remoteIndex;
-            r.on('index', function (index) {
+            let remoteIndex;
+            r.on('index', (index) => {
 
                 remoteIndex = index;
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(remoteIndex).to.exist();
-                expect(remoteIndex.variant).to.be.true();
-                expect(remoteIndex.programs['1'][0].uri).to.exist();
+                expect(remoteIndex.master).to.be.true();
+                expect(remoteIndex.variants[0].uri).to.exist();
                 done();
             });
 
@@ -246,37 +248,37 @@ describe('HlsSegmentReader()', function () {
         });
     });
 
-    describe('on-demand index', function () {
+    describe('on-demand index', () => {
 
-        it('outputs all segments', function (done) {
+        it('outputs all segments', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 expect(segment.seq).to.equal(segments.length);
                 segments.push(segment);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(3);
                 done();
             });
         });
 
-        it('emits the "index" event before starting', function (done) {
+        it('emits the "index" event before starting', (done) => {
 
-            var r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
+            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
 
-            var hasSegment = false;
-            r.on('data', function () {
+            let hasSegment = false;
+            r.on('data', () => {
 
                 hasSegment = true;
             });
 
-            r.on('index', function (index) {
+            r.on('index', (index) => {
 
                 expect(index).to.exist();
                 expect(hasSegment).to.be.false();
@@ -284,110 +286,110 @@ describe('HlsSegmentReader()', function () {
             });
         });
 
-        it('handles byte-range (file)', function (done) {
+        it('handles byte-range (file)', (done) => {
 
-            var r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'single.m3u8'), { withData: true });
+            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'single.m3u8'), { withData: true });
 
-            var checksums = [];
-            r.on('data', function (segment) {
+            const checksums = [];
+            r.on('data', (segment) => {
 
                 r.pause();
 
-                var hasher = Crypto.createHash('sha1');
+                const hasher = Crypto.createHash('sha1');
                 hasher.setEncoding('hex');
 
                 segment.stream.pipe(hasher);
-                segment.stream.on('end', function () {
+                segment.stream.on('end', () => {
 
                     checksums.push(hasher.read());
                     r.resume();
 
                     if (checksums.length === 3) {
-                        expect(checksums).to.deep.equal(internals.checksums);
+                        expect(checksums).to.equal(internals.checksums);
                         done();
                     }
                 });
             });
         });
 
-        it('handles byte-range (http)', function (done) {
+        it('handles byte-range (http)', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/single.m3u8', { withData: true });
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/single.m3u8', { withData: true });
 
-            var checksums = [];
-            r.on('data', function (segment) {
+            const checksums = [];
+            r.on('data', (segment) => {
 
                 r.pause();
 
-                var hasher = Crypto.createHash('sha1');
+                const hasher = Crypto.createHash('sha1');
                 hasher.setEncoding('hex');
 
                 segment.stream.pipe(hasher);
-                segment.stream.on('end', function () {
+                segment.stream.on('end', () => {
 
                     checksums.push(hasher.read());
                     r.resume();
 
                     if (checksums.length === 3) {
-                        expect(checksums).to.deep.equal(internals.checksums);
+                        expect(checksums).to.equal(internals.checksums);
                         done();
                     }
                 });
             });
         });
 
-        it('supports the startDate option', function (done) {
+        it('supports the startDate option', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8', { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8', { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 expect(segment.seq).to.equal(segments.length + 2);
                 segments.push(segment);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(1);
                 done();
             });
         });
 
-        it('supports the stopDate option', function (done) {
+        it('supports the stopDate option', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8', { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8', { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 expect(segment.seq).to.equal(segments.length);
                 segments.push(segment);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(2);
                 done();
             });
         });
 
-        it('applies the extensions option', function (done) {
+        it('applies the extensions option', (done) => {
 
-            var extensions = {
+            const extensions = {
                 '#EXT-MY-HEADER': false,
                 '#EXT-MY-SEGMENT-OK': true
             };
 
-            var r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'), { extensions: extensions });
+            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'), { extensions: extensions });
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 segments.push(segment);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(r.index).to.exist();
                 expect(r.index.vendor['#EXT-MY-HEADER']).to.equal('hello');
@@ -398,70 +400,70 @@ describe('HlsSegmentReader()', function () {
             });
         });
 
-        it('supports the highWaterMark option', function (done) {
+        it('supports the highWaterMark option', (done) => {
 
-            var r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 2 });
+            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 2 });
 
-            var buffered = [];
-            r.on('data', function (segment) {
+            const buffered = [];
+            r.on('data', (segment) => {
 
                 r.pause();
-                setTimeout(function () {
+                setTimeout(() => {
 
                     buffered.push(r._readableState.buffer.length);
                     r.resume();
 
                     if (segment.seq === 5) {
-                        expect(buffered).to.deep.equal([2, 2, 2, 2, 1, 0]);
+                        expect(buffered).to.equal([2, 2, 2, 2, 1, 0]);
                         done();
                     }
                 }, 20);
             });
         });
 
-        it('abort() also aborts active streams when withData is set', function (done) {
+        it('abort() also aborts active streams when withData is set', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/slow.m3u8', { withData: true, highWaterMark: 2 });
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/slow.m3u8', { withData: true, highWaterMark: 2 });
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 expect(segment.seq).to.equal(segments.length);
                 segments.push(segment);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(2);
                 done();
             });
 
-            setTimeout(function () {
+            setTimeout(() => {
 
                 r.abort();
             }, 50);
         });
 
-        it('abort() graceful is respected', function (done) {
+        it('abort() graceful is respected', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/slow.m3u8', { withData: true, stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/slow.m3u8', { withData: true, stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
 
-            var checksums = [];
-            r.on('data', function (segment) {
+            const checksums = [];
+            r.on('data', (segment) => {
 
                 r.pause();
 
-                var hasher = Crypto.createHash('sha1');
+                const hasher = Crypto.createHash('sha1');
                 hasher.setEncoding('hex');
 
                 segment.stream.pipe(hasher);
-                segment.stream.on('end', function () {
+                segment.stream.on('end', () => {
 
                     checksums.push(hasher.read());
                     r.resume();
 
                     if (checksums.length === 2) {
-                        expect(checksums).to.deep.equal(internals.checksums.slice(0, 2));
+                        expect(checksums).to.equal(internals.checksums.slice(0, 2));
                         done();
                     }
                 });
@@ -472,18 +474,18 @@ describe('HlsSegmentReader()', function () {
             });
         });
 
-        it('can be destroyed', function (done) {
+        it('can be destroyed', (done) => {
 
-            var r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
+            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 segments.push(segment);
                 r.destroy();
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(1);
                 done();
@@ -495,28 +497,28 @@ describe('HlsSegmentReader()', function () {
         // handles .m3u files
     });
 
-    describe('live index', { parallel: false }, function () {
+    describe('live index', { parallel: false }, () => {
 
-        var state = {};
-        var liveServer;
+        let state = {};
+        let liveServer;
 
-        lab.before(function (done) {
+        lab.before((done) => {
 
             liveServer = new Hapi.Server({ debug: false });
             liveServer.connection({ routes: { files: { relativeTo: Path.join(__dirname, 'fixtures') } } });
 
-            var serveIndex = function (request, reply) {
+            const serveIndex = (request, reply) => {
 
-                var segments = new Array(state.segmentCount);
-                for (var idx = 0; idx < segments.length; idx++) {
-                    segments[idx] = {
+                const segments = new Array(state.segmentCount);
+                for (let i = 0; i < segments.length; ++i) {
+                    segments[i] = {
                         duration: 1,
-                        uri: '' + (state.firstSeqNo + idx) + '.ts',
+                        uri: '' + (state.firstSeqNo + i) + '.ts',
                         title: ''
                     };
                 }
 
-                var index = new M3U8Parse.M3U8Playlist({
+                const index = new M3U8Parse.M3U8Playlist({
                     'first_seq_no': state.firstSeqNo,
                     'target_duration': 0,
                     segments: segments,
@@ -526,18 +528,18 @@ describe('HlsSegmentReader()', function () {
                 reply(index.toString()).type('application/vnd.apple.mpegURL');
             };
 
-            var serveSegment = function (request, reply) {
+            const serveSegment = (request, reply) => {
 
                 if (state.slow) {
-                    var slowStream = new Readable();
-                    slowStream._read = function () {};
+                    const slowStream = new Readable();
+                    slowStream._read = () => {};
 
                     slowStream.push(new Buffer(5000));
 
                     return reply(slowStream).type('video/mp2t').bytes(30000);
                 }
 
-                var size = 5000 + parseInt(request.params.segment);
+                const size = 5000 + parseInt(request.params.segment);
                 return reply(new Buffer(size)).type('video/mp2t').bytes(size);
             };
 
@@ -547,23 +549,23 @@ describe('HlsSegmentReader()', function () {
             liveServer.start(done);
         });
 
-        lab.after(function (done) {
+        lab.after((done) => {
 
             liveServer.stop(done);
         });
 
-        lab.beforeEach(function (done) {
+        lab.beforeEach((done) => {
 
             state = { firstSeqNo: 0, segmentCount: 10 };
             done();
         });
 
-        it('handles a basic stream', function (done) {
+        it('handles a basic stream', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
+            const r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 expect(segment.seq).to.equal(segments.length);
                 segments.push(segment);
@@ -573,7 +575,7 @@ describe('HlsSegmentReader()', function () {
                     if (state.firstSeqNo === 5) {
                         state.ended = true;
                         r.pause();
-                        setTimeout(function () {
+                        setTimeout(() => {
 
                             r.resume();
                         }, 50);
@@ -581,22 +583,22 @@ describe('HlsSegmentReader()', function () {
                 }
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(15);
                 done();
             });
         });
 
-        it('handles sequence number resets', function (done) {
+        it('handles sequence number resets', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
+            const r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
 
-            var reset = false;
+            let reset = false;
             state.firstSeqNo = 10;
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 segments.push(segment);
 
@@ -609,17 +611,18 @@ describe('HlsSegmentReader()', function () {
                         reset = true;
 
                         r.pause();
-                        setTimeout(function () {
+                        setTimeout(() => {
 
                             r.resume();
                         }, 50);
                     }
-                } else {
+                }
+                else {
                     state.segmentCount++;
                     if (state.segmentCount === 5) {
                         state.ended = true;
                         r.pause();
-                        setTimeout(function () {
+                        setTimeout(() => {
 
                             r.resume();
                         }, 50);
@@ -627,7 +630,7 @@ describe('HlsSegmentReader()', function () {
                 }
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(11);
                 expect(segments[6].seq).to.equal(0);
@@ -638,14 +641,14 @@ describe('HlsSegmentReader()', function () {
             });
         });
 
-        it('handles sequence number jumps', function (done) {
+        it('handles sequence number jumps', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
+            const r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
 
-            var skipped = false;
+            let skipped = false;
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 segments.push(segment);
 
@@ -661,7 +664,7 @@ describe('HlsSegmentReader()', function () {
                     if (state.firstSeqNo === 55) {
                         state.ended = true;
                         r.pause();
-                        setTimeout(function () {
+                        setTimeout(() => {
 
                             r.resume();
                         }, 50);
@@ -669,7 +672,7 @@ describe('HlsSegmentReader()', function () {
                 }
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(29);
                 expect(segments[14].seq).to.equal(50);
@@ -680,14 +683,14 @@ describe('HlsSegmentReader()', function () {
             });
         });
 
-        it('aborts downloads that have been evicted from index', function (done) {
+        it('aborts downloads that have been evicted from index', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { withData: true, fullStream: true });
+            const r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { withData: true, fullStream: true });
 
             state.slow = true;
 
-            var segments = [];
-            r.on('data', function (segment) {
+            const segments = [];
+            r.on('data', (segment) => {
 
                 segments.push(segment);
 
@@ -695,13 +698,13 @@ describe('HlsSegmentReader()', function () {
                 state.ended = true;
 
                 r.pause();
-                setTimeout(function () {
+                setTimeout(() => {
 
                     r.resume();
                 }, 50);
             });
 
-            r.on('end', function () {
+            r.on('end', () => {
 
                 expect(segments.length).to.equal(11);
                 expect(segments[0].stream.closed).to.be.true();
@@ -711,13 +714,13 @@ describe('HlsSegmentReader()', function () {
             });
         });
 
-        it('respects the maxStallTime option', function (done) {
+        it('respects the maxStallTime option', (done) => {
 
-            var r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { maxStallTime: 5, fullStream: true });
+            const r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { maxStallTime: 5, fullStream: true });
 
             state.segmentCount = 1;
 
-            r.on('error', function (err) {
+            r.on('error', (err) => {
 
                 expect(err).to.be.instanceOf(Error);
                 expect(err.message).to.contain('Index update stalled');

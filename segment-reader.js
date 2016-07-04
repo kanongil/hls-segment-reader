@@ -1,34 +1,34 @@
-/* jshint node:true */
+/* eslint-env node, es6 */
 
 'use strict';
 
-var Url = require('url'),
-    Util = require('util');
+const Url = require('url');
+const Util = require('util');
 
-var M3U8Parse = require('m3u8parse'),
-    Oncemore = require('oncemore'),
-    UriStream = require('uristream');
+const M3U8Parse = require('m3u8parse');
+const Oncemore = require('oncemore');
+const UriStream = require('uristream');
 
-var Readable = require('readable-stream');
+const Readable = require('readable-stream');
 
 
-var internals = {};
+const internals = {};
 
 
 internals.fetchFrom = function (reader, seqNo, segment, callback) {
 
-    var segmentUrl = Url.resolve(reader.baseUrl, segment.uri);
-    var probe = !reader.withData;
+    const segmentUrl = Url.resolve(reader.baseUrl, segment.uri);
+    const probe = !reader.withData;
 
-    var streamOptions = { probe: probe, highWaterMark: 100 * 1000 * 1000 };
+    const streamOptions = { probe: probe, highWaterMark: 100 * 1000 * 1000 };
     if (segment.byterange) {
         streamOptions.start = segment.byterange.offset;
         streamOptions.end = segment.byterange.offset + segment.byterange.length - 1;
     }
 
-    var stream = UriStream(segmentUrl, streamOptions);
+    const stream = UriStream(segmentUrl, streamOptions);
 
-    var finish = function (err, res) {
+    const finish = (err, res) => {
 
         stream.removeListener('meta', onmeta);
         stream.removeListener('end', onfail);
@@ -36,7 +36,7 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
         callback(err, res);
     };
 
-    var onmeta = function (meta) {
+    const onmeta = (meta) => {
 
         if (reader.segmentMimeTypes.indexOf(meta.mime.toLowerCase()) === -1) {
             stream.abort();
@@ -46,7 +46,7 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
         finish(null, new exports.HlsSegmentObject(seqNo, segment, meta, probe ? null : stream));
     };
 
-    var onfail = function (err) {
+    const onfail = (err) => {
 
         if (!err) {     // defensive programming
             err = new Error('No metadata');
@@ -63,16 +63,16 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
 };
 
 
-internals.checkNext = function checknext (reader) {
+internals.checkNext = function (reader) {
 
-    var state = reader.readState;
-    var index = reader.index;
+    const state = reader.readState;
+    const index = reader.index;
     if (!reader.readable || !state.active || state.fetching || state.nextSeq === -1 || !index) {
         return null;
     }
 
-    var seq = state.nextSeq;
-    var segment = index.getSegment(seq, true);
+    const seq = state.nextSeq;
+    const segment = index.getSegment(seq, true);
 
     if (segment) {
         // mark manual discontinuities
@@ -87,7 +87,7 @@ internals.checkNext = function checknext (reader) {
             return reader.push(null);
         }
 
-        state.fetching = internals.fetchFrom(reader, seq, segment, function (err, object) {
+        state.fetching = internals.fetchFrom(reader, seq, segment, (err, object) => {
 
             if (!reader.readable) {
                 return;
@@ -105,7 +105,7 @@ internals.checkNext = function checknext (reader) {
             if (object) {
                 if (object.stream) {
                     reader.watch[object.seq] = object.stream;
-                    Oncemore(object.stream).once('end', 'error', function () {
+                    Oncemore(object.stream).once('end', 'error', () => {
 
                         delete reader.watch[object.seq];
                     });
@@ -116,9 +116,11 @@ internals.checkNext = function checknext (reader) {
 
             internals.checkNext(reader);
         });
-    } else if (index.ended) {
+    }
+    else if (index.ended) {
         reader.push(null);
-    } else if (!index.type && (index.lastSeqNo() < state.nextSeq - 1)) {
+    }
+    else if (!index.type && (index.lastSeqNo() < state.nextSeq - 1)) {
         // handle live stream restart
         state.discont = true;
         state.nextSeq = index.startSeqNo(true);
@@ -127,13 +129,11 @@ internals.checkNext = function checknext (reader) {
 };
 
 
-var HlsSegmentReader = function (src, options) {
+const HlsSegmentReader = function (src, options) {
 
     if (!(this instanceof HlsSegmentReader)) {
         return new HlsSegmentReader(src, options);
     }
-
-    var self = this;
 
     options = options || {};
     if (typeof src === 'string') {
@@ -165,48 +165,49 @@ var HlsSegmentReader = function (src, options) {
 
     this.indexStallSince = null;
 
-    var getUpdateInterval = function (updated) {
+    const getUpdateInterval = (updated) => {
 
-        if (updated && self.index.segments.length) {
-            self.indexStallSince = null;
-            return Math.min(self.index.target_duration, self.index.segments[self.index.segments.length - 1].duration);
+        if (updated && this.index.segments.length) {
+            this.indexStallSince = null;
+            return Math.min(this.index.target_duration, this.index.segments[this.index.segments.length - 1].duration);
         }
 
-        if (self.indexStallSince !== null) {
-            if ((Date.now() - self.indexStallSince) > self.maxStallTime) {
+        if (this.indexStallSince !== null) {
+            if ((Date.now() - this.indexStallSince) > this.maxStallTime) {
                 return -1;
             }
-        } else {
-            self.indexStallSince = Date.now();
+        }
+        else {
+            this.indexStallSince = Date.now();
         }
 
-        return self.index.target_duration / 2;
+        return this.index.target_duration / 2;
     };
 
-    var initialSeqNo = function () {
+    const initialSeqNo = () => {
 
-        var index = self.index;
+        const index = this.index;
 
-        if (!self.fullStream && self.startDate) {
-            return index.seqNoForDate(self.startDate, true);
+        if (!this.fullStream && this.startDate) {
+            return index.seqNoForDate(this.startDate, true);
         }
 
-        return index.startSeqNo(self.fullStream);
+        return index.startSeqNo(this.fullStream);
     };
 
-    var updatecheck = function (updated) {
+    const updatecheck = (updated) => {
 
         if (updated) {
-            if (self.readState.nextSeq === -1) {
-                self.readState.nextSeq = initialSeqNo();
+            if (this.readState.nextSeq === -1) {
+                this.readState.nextSeq = initialSeqNo();
             }
-            else if (self.readState.nextSeq < self.index.startSeqNo(true)) {
+            else if (this.readState.nextSeq < this.index.startSeqNo(true)) {
                 // playlist skipped ahead for whatever reason
-                self.readState.discont = true;
-                self.readState.nextSeq = self.index.startSeqNo(true);
+                this.readState.discont = true;
+                this.readState.nextSeq = this.index.startSeqNo(true);
             }
 
-            var abortStream = function (stream) {
+            const abortStream = (stream) => {
 
                 if (!stream._readableState.ended) {
                     stream.abort();
@@ -214,45 +215,45 @@ var HlsSegmentReader = function (src, options) {
             };
 
             // check watched segments
-            for (var seq in self.watch) {
-                if (!self.index.isValidSeqNo(seq)) {
-                    var stream = self.watch[seq];
-                    delete self.watch[seq];
+            for (const seq in this.watch) {
+                if (!this.index.isValidSeqNo(seq)) {
+                    const stream = this.watch[seq];
+                    delete this.watch[seq];
 
-                    setTimeout(abortStream, self.index.target_duration * 1000, stream);
+                    setTimeout(abortStream, this.index.target_duration * 1000, stream);
                 }
             }
 
-            self.emit('index', self.index);
+            this.emit('index', this.index);
 
-            if (self.index.variant) {
-                return self.push(null);
+            if (this.index.master) {
+                return this.push(null);
             }
         }
-        internals.checkNext(self);
+        internals.checkNext(this);
 
-        if (self.index && !self.index.ended && self.readable) {
-            var updateInterval = getUpdateInterval(updated);
+        if (this.index && !this.index.ended && this.readable) {
+            const updateInterval = getUpdateInterval(updated);
             if (updateInterval <= 0) {
-                return self.emit('error', new Error('Index update stalled'));
+                return this.emit('error', new Error('Index update stalled'));
             }
 
             setTimeout(updateindex, Math.max(1, updateInterval) * 1000);
         }
     };
 
-    var updateindex = function () {
+    const updateindex = () => {
 
-        if (!self.readable) {
+        if (!this.readable) {
             return;
         }
 
-        var stream = UriStream(Url.format(self.url), { timeout: 30 * 1000 });
-        stream.on('meta', function (meta) {
+        const stream = UriStream(Url.format(this.url), { timeout: 30 * 1000 });
+        stream.on('meta', (meta) => {
 
             // Check for valid mime type
 
-            if (self.indexMimeTypes.indexOf(meta.mime.toLowerCase()) === -1 &&
+            if (this.indexMimeTypes.indexOf(meta.mime.toLowerCase()) === -1 &&
                     meta.url.indexOf('.m3u8', meta.url.length - 5) === -1 &&
                     meta.url.indexOf('.m3u', meta.url.length - 4) === -1) {
 
@@ -262,25 +263,26 @@ var HlsSegmentReader = function (src, options) {
                 return stream.emit('error', new Error('Invalid MIME type: ' + meta.mime));
             }
 
-            self.baseUrl = meta.url;
+            this.baseUrl = meta.url;
         });
 
-        M3U8Parse(stream, { extensions: self.extensions }, function (err, index) {
+        M3U8Parse(stream, { extensions: this.extensions }, (err, index) => {
 
-            if (!self.readable) {
+            if (!this.readable) {
                 return;
             }
 
             if (err) {
-                self.emit('error', err);
+                this.emit('error', err);
                 updatecheck(false);
-            } else {
-                var updated = true;
-                if (self.index && self.index.lastSeqNo() === index.lastSeqNo()) {
+            }
+            else {
+                let updated = true;
+                if (this.index && this.index.lastSeqNo() === index.lastSeqNo()) {
                     updated = false;
                 }
 
-                self.index = index;
+                this.index = index;
                 updatecheck(updated);
             }
         });
@@ -299,13 +301,13 @@ HlsSegmentReader.prototype.abort = function (graceful) {
 
         // Abort all active streams
 
-        var state = this.readState;
+        const state = this.readState;
         if (state.fetching && !state.fetching._readableState.ended) {
             state.fetching.abort();
         }
 
-        for (var seq in this.watch) {
-            var stream = this.watch[seq];
+        for (const seq in this.watch) {
+            const stream = this.watch[seq];
             delete this.watch[seq];
             if (!stream._readableState.ended) {
                 stream.abort();
@@ -354,7 +356,7 @@ HlsSegmentReader.prototype._read = function (/*n*/) {
 };
 
 
-var exports = module.exports = HlsSegmentReader;
+exports = module.exports = HlsSegmentReader;
 
 exports.HlsSegmentObject = function (seq, segment, fileMeta, stream) {
 
