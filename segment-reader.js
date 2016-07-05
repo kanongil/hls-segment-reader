@@ -38,7 +38,7 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
 
     const onmeta = (meta) => {
 
-        if (reader.segmentMimeTypes.indexOf(meta.mime.toLowerCase()) === -1) {
+        if (!reader.segmentMimeTypes[meta.mime.toLowerCase()]) {
             stream.abort();
             return stream.emit('error', new Error('Unsupported segment MIME type: ' + meta.mime));
         }
@@ -253,7 +253,7 @@ const HlsSegmentReader = function (src, options) {
 
             // Check for valid mime type
 
-            if (this.indexMimeTypes.indexOf(meta.mime.toLowerCase()) === -1 &&
+            if (!this.indexMimeTypes[meta.mime.toLowerCase()] &&
                     meta.url.indexOf('.m3u8', meta.url.length - 5) === -1 &&
                     meta.url.indexOf('.m3u', meta.url.length - 4) === -1) {
 
@@ -333,20 +333,25 @@ HlsSegmentReader.prototype.destroy = function () {
 };
 
 
-HlsSegmentReader.prototype.indexMimeTypes = [
-    'application/vnd.apple.mpegurl',
-    'application/x-mpegurl',
-    'audio/mpegurl'
-];
+HlsSegmentReader.prototype.indexMimeTypes = {
+    'application/vnd.apple.mpegurl': true,
+    'application/x-mpegurl': true,
+    'audio/mpegurl': true
+};
 
 
-HlsSegmentReader.prototype.segmentMimeTypes = [
-    'video/mp2t',
-    'audio/aac',
-    'audio/x-aac',
-    'audio/ac3',
-    'text/vtt'
-];
+HlsSegmentReader.prototype.segmentMimeTypes = {
+    'video/mp2t': true,
+    'video/mpeg': true,
+    'video/mp4': true,
+    'audio/aac': true,
+    'audio/x-aac': true,
+    'audio/ac3': true,
+    'audio/vnd.dolby.dd-raw': true,
+    'audio/x-ac3': true,
+    'audio/eac3': true,
+    'text/vtt': true
+};
 
 
 HlsSegmentReader.prototype._read = function (/*n*/) {
