@@ -25,6 +25,9 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
         streamOptions.start = segment.byterange.offset;
         streamOptions.end = segment.byterange.offset + segment.byterange.length - 1;
     }
+    if (probe) {
+        streamOptions.timeout = 30 * 1000;
+    }
 
     const stream = UriStream(segmentUrl, streamOptions);
 
