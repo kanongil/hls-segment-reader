@@ -33,10 +33,10 @@
     "segment-reader.js"
   ],
   "devDependencies": {
-    "code": "^3.0.1",
-    "hapi": "^13.4.2",
+    "code": "^4.0.0",
+    "hapi": "^16.0.1",
     "inert": "^4.0.0",
-    "lab": "^10.8.2"
+    "lab": "^11.2.1"
   },
   "repository": {
     "type": "git",

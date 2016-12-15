@@ -16,9 +16,11 @@ const HlsSegmentReader = require('../segment-reader');
 // Declare internals
 
 const internals = {
-    checksums: ['c38d0718851a20be2edba13fc1643c1076826c62',
-                '612991f34ae7cc19df5d595a2a4249b8f5d2d3f0',
-                'bc600f4039aae412c4d978b3fd4d608ce4dec59a']
+    checksums: [
+        'c38d0718851a20be2edba13fc1643c1076826c62',
+        '612991f34ae7cc19df5d595a2a4249b8f5d2d3f0',
+        'bc600f4039aae412c4d978b3fd4d608ce4dec59a'
+    ]
 };
 
 
@@ -381,7 +383,7 @@ describe('HlsSegmentReader()', () => {
                 '#EXT-MY-SEGMENT-OK': true
             };
 
-            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'), { extensions: extensions });
+            const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'), { extensions });
 
             const segments = [];
             r.on('data', (segment) => {
@@ -521,7 +523,7 @@ describe('HlsSegmentReader()', () => {
                 const index = new M3U8Parse.M3U8Playlist({
                     'first_seq_no': state.firstSeqNo,
                     'target_duration': 0,
-                    segments: segments,
+                    segments,
                     ended: state.ended
                 });
 

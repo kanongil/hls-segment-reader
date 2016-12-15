@@ -20,7 +20,7 @@ internals.fetchFrom = function (reader, seqNo, segment, callback) {
     const segmentUrl = Url.resolve(reader.baseUrl, segment.uri);
     const probe = !reader.withData;
 
-    const streamOptions = { probe: probe, highWaterMark: 100 * 1000 * 1000 };
+    const streamOptions = { probe, highWaterMark: 100 * 1000 * 1000 };
     if (segment.byterange) {
         streamOptions.start = segment.byterange.offset;
         streamOptions.end = segment.byterange.offset + segment.byterange.length - 1;
