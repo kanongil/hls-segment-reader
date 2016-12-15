@@ -23,7 +23,7 @@
     "m3u8parse": "^1.0.0",
     "oncemore": "^1.0.0",
     "readable-stream": "^2.0.2",
-    "uristream": "^1.3.1"
+    "uristream": "^2.0.0"
   },
   "directories": {
     "test": "test"
