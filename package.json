@@ -2,7 +2,7 @@
   "name": "hls-segment-reader",
   "version": "3.0.0",
   "description": "Read segments from HLS streams using a Readable",
-  "main": "segment-reader.js",
+  "main": "lib/segment-reader.js",
   "scripts": {
     "test": "lab -a code -t 90 -L",
     "test-cov-html": "lab -a code -r html -o coverage.html"
@@ -20,6 +20,7 @@
     "node": ">=4.0.0"
   },
   "dependencies": {
+    "hoek": "^4.1.0",
     "m3u8parse": "^1.0.0",
     "oncemore": "^1.0.0",
     "readable-stream": "^2.0.2",
@@ -28,10 +29,6 @@
   "directories": {
     "test": "test"
   },
-  "files": [
-    "README.md",
-    "segment-reader.js"
-  ],
   "devDependencies": {
     "code": "^4.0.0",
     "hapi": "^16.0.1",

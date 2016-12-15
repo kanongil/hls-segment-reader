@@ -10,7 +10,7 @@ const Inert = require('inert');
 const Lab = require('lab');
 const M3U8Parse = require('m3u8parse');
 
-const HlsSegmentReader = require('../segment-reader');
+const HlsSegmentReader = require('..');
 
 
 // Declare internals
@@ -186,7 +186,7 @@ describe('HlsSegmentReader()', () => {
             expect(err1).to.be.instanceOf(Error);
             expect(err1.message).to.contain('Unsupported segment MIME type');
 
-            const r2 = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'badtype-data.m3u8'));
+            const r2 = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'badtype-data.m3u8'), { withData: true });
 
             r2.resume();
             r2.on('error', (err2) => {
