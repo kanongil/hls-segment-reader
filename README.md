@@ -27,7 +27,7 @@ Emitted whenever a new remote index has been parsed.
 
 ### Event: `data`
 
- * `segment` - `HlsSegmentObject` containing segment data.
+ * `obj` - `HlsSegmentObject` containing segment data.
 
 ### HlsSegmentReader#abort([graceful])
 
@@ -35,6 +35,7 @@ Stop the reader.
 
 ### HlsSegmentObject
 
+ * `type` - `'segment'` or `'init'`.
  * `file` - File metadata from remote server.
  * `stream` - `uristream` `Readable` with segment data when `withData` is set.
  * `segment` - Object with segment data, when type is `'segment'`:

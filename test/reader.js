@@ -17,6 +17,7 @@ const HlsSegmentReader = require('..');
 
 const internals = {
     checksums: [
+        'a6b0e0ce44f29e965e751113b39fdf4a47787cab',
         'c38d0718851a20be2edba13fc1643c1076826c62',
         '612991f34ae7cc19df5d595a2a4249b8f5d2d3f0',
         'bc600f4039aae412c4d978b3fd4d608ce4dec59a'
@@ -306,7 +307,7 @@ describe('HlsSegmentReader()', () => {
                     checksums.push(hasher.read());
                     r.resume();
 
-                    if (checksums.length === 3) {
+                    if (checksums.length === 4) {
                         expect(checksums).to.equal(internals.checksums);
                         done();
                     }
@@ -332,7 +333,7 @@ describe('HlsSegmentReader()', () => {
                     checksums.push(hasher.read());
                     r.resume();
 
-                    if (checksums.length === 3) {
+                    if (checksums.length === 4) {
                         expect(checksums).to.equal(internals.checksums);
                         done();
                     }
@@ -465,7 +466,7 @@ describe('HlsSegmentReader()', () => {
                     r.resume();
 
                     if (checksums.length === 2) {
-                        expect(checksums).to.equal(internals.checksums.slice(0, 2));
+                        expect(checksums).to.equal(internals.checksums.slice(1, 3));
                         done();
                     }
                 });
