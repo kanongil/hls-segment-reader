@@ -257,10 +257,10 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                expect(segment.seq).to.equal(segments.length);
-                segments.push(segment);
+                expect(obj.segment.seq).to.equal(segments.length);
+                segments.push(obj);
             });
 
             r.on('end', () => {
@@ -293,15 +293,15 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'single.m3u8'), { withData: true });
 
             const checksums = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
                 r.pause();
 
                 const hasher = Crypto.createHash('sha1');
                 hasher.setEncoding('hex');
 
-                segment.stream.pipe(hasher);
-                segment.stream.on('end', () => {
+                obj.stream.pipe(hasher);
+                obj.stream.on('end', () => {
 
                     checksums.push(hasher.read());
                     r.resume();
@@ -319,15 +319,15 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/single.m3u8', { withData: true });
 
             const checksums = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
                 r.pause();
 
                 const hasher = Crypto.createHash('sha1');
                 hasher.setEncoding('hex');
 
-                segment.stream.pipe(hasher);
-                segment.stream.on('end', () => {
+                obj.stream.pipe(hasher);
+                obj.stream.on('end', () => {
 
                     checksums.push(hasher.read());
                     r.resume();
@@ -345,10 +345,10 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8', { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                expect(segment.seq).to.equal(segments.length + 2);
-                segments.push(segment);
+                expect(obj.segment.seq).to.equal(segments.length + 2);
+                segments.push(obj);
             });
 
             r.on('end', () => {
@@ -363,10 +363,10 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8', { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                expect(segment.seq).to.equal(segments.length);
-                segments.push(segment);
+                expect(obj.segment.seq).to.equal(segments.length);
+                segments.push(obj);
             });
 
             r.on('end', () => {
@@ -386,9 +386,9 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'), { extensions });
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                segments.push(segment);
+                segments.push(obj);
             });
 
             r.on('end', () => {
@@ -397,7 +397,7 @@ describe('HlsSegmentReader()', () => {
                 expect(r.index.vendor['#EXT-MY-HEADER']).to.equal('hello');
                 expect(r.index.segments[1].vendor).to.contain('#EXT-MY-SEGMENT-OK');
                 expect(segments.length).to.equal(3);
-                expect(segments[1].details.vendor).to.contain('#EXT-MY-SEGMENT-OK');
+                expect(segments[1].segment.details.vendor).to.contain('#EXT-MY-SEGMENT-OK');
                 done();
             });
         });
@@ -407,7 +407,7 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 2 });
 
             const buffered = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
                 r.pause();
                 setTimeout(() => {
@@ -415,7 +415,7 @@ describe('HlsSegmentReader()', () => {
                     buffered.push(r._readableState.buffer.length);
                     r.resume();
 
-                    if (segment.seq === 5) {
+                    if (obj.segment.seq === 5) {
                         expect(buffered).to.equal([2, 2, 2, 2, 1, 0]);
                         done();
                     }
@@ -428,10 +428,10 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/slow.m3u8', { withData: true, highWaterMark: 2 });
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                expect(segment.seq).to.equal(segments.length);
-                segments.push(segment);
+                expect(obj.segment.seq).to.equal(segments.length);
+                segments.push(obj);
             });
 
             r.on('end', () => {
@@ -451,15 +451,15 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/slow.m3u8', { withData: true, stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
 
             const checksums = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
                 r.pause();
 
                 const hasher = Crypto.createHash('sha1');
                 hasher.setEncoding('hex');
 
-                segment.stream.pipe(hasher);
-                segment.stream.on('end', () => {
+                obj.stream.pipe(hasher);
+                obj.stream.on('end', () => {
 
                     checksums.push(hasher.read());
                     r.resume();
@@ -470,7 +470,7 @@ describe('HlsSegmentReader()', () => {
                     }
                 });
 
-                if (segment.seq === 1) {
+                if (obj.segment.seq === 1) {
                     r.abort(true);
                 }
             });
@@ -481,9 +481,9 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                segments.push(segment);
+                segments.push(obj);
                 r.destroy();
             });
 
@@ -567,12 +567,12 @@ describe('HlsSegmentReader()', () => {
             const r = new HlsSegmentReader('http://localhost:' + liveServer.info.port + '/live/live.m3u8', { fullStream: true });
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                expect(segment.seq).to.equal(segments.length);
-                segments.push(segment);
+                expect(obj.segment.seq).to.equal(segments.length);
+                segments.push(obj);
 
-                if (segment.seq > 5) {
+                if (obj.segment.seq > 5) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 5) {
                         state.ended = true;
@@ -600,9 +600,9 @@ describe('HlsSegmentReader()', () => {
             state.firstSeqNo = 10;
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                segments.push(segment);
+                segments.push(obj);
 
                 if (!reset) {
                     state.firstSeqNo++;
@@ -635,10 +635,10 @@ describe('HlsSegmentReader()', () => {
             r.on('end', () => {
 
                 expect(segments.length).to.equal(11);
-                expect(segments[6].seq).to.equal(0);
-                expect(segments[5].details.discontinuity).to.be.false();
-                expect(segments[6].details.discontinuity).to.be.true();
-                expect(segments[7].details.discontinuity).to.be.false();
+                expect(segments[6].segment.seq).to.equal(0);
+                expect(segments[5].segment.details.discontinuity).to.be.false();
+                expect(segments[6].segment.details.discontinuity).to.be.true();
+                expect(segments[7].segment.details.discontinuity).to.be.false();
                 done();
             });
         });
@@ -650,18 +650,18 @@ describe('HlsSegmentReader()', () => {
             let skipped = false;
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                segments.push(segment);
+                segments.push(obj);
 
-                if (!skipped && segment.seq >= state.segmentCount - 1) {
+                if (!skipped && obj.segment.seq >= state.segmentCount - 1) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 5) {
                         state.firstSeqNo = 50;
                         skipped = true;
                     }
                 }
-                if (skipped && segment.seq > 55) {
+                if (skipped && obj.segment.seq > 55) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 55) {
                         state.ended = true;
@@ -677,10 +677,10 @@ describe('HlsSegmentReader()', () => {
             r.on('end', () => {
 
                 expect(segments.length).to.equal(29);
-                expect(segments[14].seq).to.equal(50);
-                expect(segments[13].details.discontinuity).to.be.false();
-                expect(segments[14].details.discontinuity).to.be.true();
-                expect(segments[15].details.discontinuity).to.be.false();
+                expect(segments[14].segment.seq).to.equal(50);
+                expect(segments[13].segment.details.discontinuity).to.be.false();
+                expect(segments[14].segment.details.discontinuity).to.be.true();
+                expect(segments[15].segment.details.discontinuity).to.be.false();
                 done();
             });
         });
@@ -692,9 +692,9 @@ describe('HlsSegmentReader()', () => {
             state.slow = true;
 
             const segments = [];
-            r.on('data', (segment) => {
+            r.on('data', (obj) => {
 
-                segments.push(segment);
+                segments.push(obj);
 
                 state.firstSeqNo++;
                 state.ended = true;

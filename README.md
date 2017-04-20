@@ -35,10 +35,11 @@ Stop the reader.
 
 ### HlsSegmentObject
 
- * `seq` - Sequence number.
- * `details` - `M3U8Segment` info.
- * `file` - Segment file metadata.
+ * `file` - File metadata from remote server.
  * `stream` - `uristream` `Readable` with segment data when `withData` is set.
+ * `segment` - Object with segment data, when type is `'segment'`:
+   * `seq` - Sequence number.
+   * `details` - `M3U8Segment` info.
 
 ## Installation
 
