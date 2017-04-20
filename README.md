@@ -41,6 +41,7 @@ Stop the reader.
  * `segment` - Object with segment data, when type is `'segment'`:
    * `seq` - Sequence number.
    * `details` - `M3U8Segment` info.
+ * `init` - m3u8 `AttrList` with map segment data when type is `'init'`.
 
 ## Installation
 
