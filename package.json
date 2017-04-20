@@ -1,6 +1,6 @@
 {
   "name": "hls-segment-reader",
-  "version": "3.1.2",
+  "version": "4.0.0",
   "description": "Read segments from HLS streams using a Readable",
   "main": "lib/segment-reader.js",
   "scripts": {
