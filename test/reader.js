@@ -537,13 +537,13 @@ describe('HlsSegmentReader()', () => {
                     const slowStream = new Readable();
                     slowStream._read = () => {};
 
-                    slowStream.push(new Buffer(5000));
+                    slowStream.push(Buffer.alloc(5000));
 
                     return reply(slowStream).type('video/mp2t').bytes(30000);
                 }
 
                 const size = 5000 + parseInt(request.params.segment);
-                return reply(new Buffer(size)).type('video/mp2t').bytes(size);
+                return reply(Buffer.alloc(size)).type('video/mp2t').bytes(size);
             };
 
             liveServer.route({ method: 'GET', path: '/live/live.m3u8', handler: serveIndex });
