@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@hapi/hoek": "^6.2.1",
-    "m3u8parse": "^1.0.0",
+    "m3u8parse": "^2.0.0",
     "oncemore": "^1.1.0",
     "readable-stream": "^3.3.0",
     "uristream": "^3.0.0"
