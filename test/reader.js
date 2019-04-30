@@ -120,16 +120,13 @@ describe('HlsSegmentReader()', () => {
 
     describe('constructor', () => {
 
-        it('creates valid objects', () => {
+        it('creates a valid object', () => {
 
-            const r1 = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
-            const r2 = HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
+            const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
 
-            expect(r1).to.be.instanceOf(HlsSegmentReader);
-            expect(r2).to.be.instanceOf(HlsSegmentReader);
+            expect(r).to.be.instanceOf(HlsSegmentReader);
 
-            r1.abort();
-            r2.abort();
+            r.abort();
         });
 
         it('throws on missing uri option', () => {
