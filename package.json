@@ -26,9 +26,6 @@
     "readable-stream": "^3.3.0",
     "uristream": "^3.0.0"
   },
-  "directories": {
-    "test": "test"
-  },
   "devDependencies": {
     "@hapi/code": "^5.3.1",
     "@hapi/hapi": "^18.3.1",
