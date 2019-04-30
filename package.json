@@ -4,8 +4,8 @@
   "description": "Read segments from HLS streams using a Readable",
   "main": "lib/segment-reader.js",
   "scripts": {
-    "test": "lab -a code -t 90 -L",
-    "test-cov-html": "lab -a code -r html -o coverage.html"
+    "test": "lab -a @hapi/code -t 90 -L",
+    "test-cov-html": "lab -a @hapi/code -r html -o coverage.html"
   },
   "keywords": [
     "streaming",
@@ -17,23 +17,23 @@
   "author": "Gil Pedersen <gpdev@gpost.dk>",
   "license": "BSD-2-Clause",
   "engines": {
-    "node": ">=4.0.0"
+    "node": ">=10.4.0"
   },
   "dependencies": {
-    "hoek": "^4.1.0",
+    "@hapi/hoek": "^6.2.1",
     "m3u8parse": "^1.0.0",
-    "oncemore": "^1.0.0",
-    "readable-stream": "^2.0.2",
-    "uristream": "^2.0.0"
+    "oncemore": "^1.1.0",
+    "readable-stream": "^3.3.0",
+    "uristream": "^3.0.0"
   },
   "directories": {
     "test": "test"
   },
   "devDependencies": {
-    "code": "^4.0.0",
-    "hapi": "^16.0.1",
-    "inert": "^4.0.0",
-    "lab": "^13.0.2"
+    "@hapi/code": "^5.3.1",
+    "@hapi/hapi": "^18.3.1",
+    "@hapi/inert": "^5.2.0",
+    "@hapi/lab": "^18.1.2"
   },
   "repository": {
     "type": "git",
