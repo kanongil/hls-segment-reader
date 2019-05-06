@@ -11,6 +11,7 @@ const Hoek = require('@hapi/hoek');
 const Inert = require('@hapi/inert');
 const Lab = require('@hapi/lab');
 const M3U8Parse = require('m3u8parse');
+const Uristream = require('uristream');
 
 const HlsSegmentReader = require('..');
 
@@ -172,6 +173,32 @@ describe('HlsSegmentReader()', () => {
 
         const promise = readSegments(`http://localhost:${server.info.port}/simple/500.ts`);
         await expect(promise).to.reject(Error, /Invalid MIME type/);
+    });
+
+    it('Uristream maps file extensions to suitable mime types', async () => {
+
+        const map = new Map([
+            ['audio.aac', 'audio/x-aac'],
+            ['audio.ac3', 'audio/ac3'],
+            ['audio.dts', 'audio/vnd.dts'],
+            ['audio.eac3', 'audio/eac3'],
+            ['audio.m4a', 'audio/mp4'],
+            ['file.m4s', 'video/iso.segment'],
+            ['file.mp4', 'video/mp4'],
+            ['text.vtt', 'text/vtt'],
+            ['video.m4v', 'video/x-m4v']
+        ]);
+
+        for (const [file, mime] of map) {
+            const meta = await new Promise((resolve, reject) => {
+
+                const uristream = new Uristream(`file://${Path.resolve(__dirname, 'fixtures/files', file)}`);
+                uristream.on('error', reject);
+                uristream.on('meta', resolve);
+            });
+
+            expect(meta.mime).to.equal(mime);
+        }
     });
 
     it('emits error on unknown segment mime type', async () => {
