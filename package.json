@@ -17,20 +17,20 @@
   "author": "Gil Pedersen <gpdev@gpost.dk>",
   "license": "BSD-2-Clause",
   "engines": {
-    "node": ">=10.4.0"
+    "node": ">=10.13.0"
   },
   "dependencies": {
-    "@hapi/hoek": "^6.2.1",
+    "@hapi/hoek": "^8.4.0",
     "m3u8parse": "^2.0.0",
     "oncemore": "^1.1.0",
     "readable-stream": "^3.3.0",
-    "uristream": "^3.0.0"
+    "uristream": "^4.0.1"
   },
   "devDependencies": {
-    "@hapi/code": "^5.3.1",
+    "@hapi/code": "^7.0.0",
     "@hapi/hapi": "^18.3.1",
     "@hapi/inert": "^5.2.0",
-    "@hapi/lab": "^18.1.2"
+    "@hapi/lab": "^21.0.0"
   },
   "repository": {
     "type": "git",

@@ -378,10 +378,10 @@ describe('HlsSegmentReader()', () => {
             }
 
             expect(r.index).to.exist();
-            expect(r.index.vendor.get('#EXT-MY-HEADER')).to.equal('hello');
-            expect(r.index.segments[1].vendor.get('#EXT-MY-SEGMENT-OK')).to.equal(null);
+            expect(r.index.vendor[0]).to.equal(['#EXT-MY-HEADER', 'hello']);
+            expect(r.index.segments[1].vendor[0]).to.equal(['#EXT-MY-SEGMENT-OK', null]);
             expect(segments.length).to.equal(3);
-            expect(segments[1].segment.details.vendor.get('#EXT-MY-SEGMENT-OK')).to.equal(null);
+            expect(segments[1].segment.details.vendor[0]).to.equal(['#EXT-MY-SEGMENT-OK', null]);
         });
 
         it('supports the highWaterMark option', async () => {
