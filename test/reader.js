@@ -630,7 +630,7 @@ describe('HlsSegmentReader()', () => {
             }
 
             expect(segments.length).to.equal(11);
-            expect(segments[0].stream.closed).to.be.true();
+            expect(segments[0].stream.destroyed).to.be.true();
 
             r.abort();
         });

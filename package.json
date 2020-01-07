@@ -24,7 +24,7 @@
     "m3u8parse": "^2.0.0",
     "oncemore": "^1.1.0",
     "readable-stream": "^3.3.0",
-    "uristream": "^4.0.1"
+    "uristream": "^5.0.1"
   },
   "devDependencies": {
     "@hapi/code": "^7.0.0",
