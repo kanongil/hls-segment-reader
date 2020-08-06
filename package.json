@@ -30,7 +30,7 @@
     "@hapi/code": "^8.0.1",
     "@hapi/hapi": "^19.1.1",
     "@hapi/inert": "^6.0.1",
-    "@hapi/lab": "^22.0.4"
+    "@hapi/lab": "^23.0.0"
   },
   "repository": {
     "type": "git",
