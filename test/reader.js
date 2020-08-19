@@ -9,6 +9,7 @@ const Code = require('@hapi/code');
 const Hapi = require('@hapi/hapi');
 const Hoek = require('@hapi/hoek');
 const Inert = require('@hapi/inert');
+const Joi = require('joi');
 const Lab = require('@hapi/lab');
 const M3U8Parse = require('m3u8parse');
 const Uristream = require('uristream');
@@ -264,7 +265,7 @@ describe('HlsSegmentReader()', () => {
 
             expect(segments.length).to.equal(3);
             for (let i = 0; i < segments.length; ++i) {
-                expect(segments[i].segment.seq).to.equal(i);
+                expect(segments[i].segment.msn).to.equal(i);
             }
         });
 
@@ -343,7 +344,7 @@ describe('HlsSegmentReader()', () => {
             const segments = [];
 
             for await (const obj of r) {
-                expect(obj.segment.seq).to.equal(segments.length + 2);
+                expect(obj.segment.msn).to.equal(segments.length + 2);
                 segments.push(obj);
             }
 
@@ -356,7 +357,7 @@ describe('HlsSegmentReader()', () => {
             const segments = [];
 
             for await (const obj of r) {
-                expect(obj.segment.seq).to.equal(segments.length);
+                expect(obj.segment.msn).to.equal(segments.length);
                 segments.push(obj);
             }
 
@@ -406,7 +407,7 @@ describe('HlsSegmentReader()', () => {
             setTimeout(() => r.abort(), 50);
 
             for await (const obj of r) {
-                expect(obj.segment.seq).to.equal(segments.length);
+                expect(obj.segment.msn).to.equal(segments.length);
                 segments.push(obj);
             }
 
@@ -431,7 +432,7 @@ describe('HlsSegmentReader()', () => {
 
                 checksums.push(hash);
 
-                if (obj.segment.seq === 1) {
+                if (obj.segment.msn === 1) {
                     r.abort(true);
                 }
             }
@@ -459,8 +460,72 @@ describe('HlsSegmentReader()', () => {
 
     describe('live index', { parallel: false }, () => {
 
-        let state = {};
+        let serverState = {};
         let liveServer;
+
+        const prepareLiveReader = function (readerOptions = {}, state = {}) {
+
+            const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
+            reader._intervals = [];
+            reader._getUpdateInterval = function (updated) {
+
+                this._intervals.push(HlsSegmentReader.prototype._getUpdateInterval.call(this, updated));
+                return undefined;
+            };
+
+            serverState = { firstSeqNo: 0, segmentCount: 10, targetDuration: 2, ...state };
+
+            return { reader, state: serverState };
+        };
+
+        const genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCount, partIndex, ended }) {
+
+            const partDuration = targetDuration / partCount;
+
+            const segments = [];
+            for (let i = 0; i < segmentCount; ++i) {
+                const parts = [];
+                if (i >= segmentCount - 2) {
+                    for (let j = 0; j < partCount; ++j) {
+                        parts.push(new M3U8Parse.AttrList({
+                            duration: partDuration,
+                            uri: `"${firstSeqNo + i}-part${j}.ts"`
+                        }));
+                    }
+                }
+
+                segments.push({
+                    duration: targetDuration || 2,
+                    uri: `${firstSeqNo + i}.ts`,
+                    title: '',
+                    parts: parts.length ? parts : undefined
+                });
+            }
+
+            if (partIndex) {
+                const parts = [];
+                for (let i = 0; i < partIndex; ++i) {
+                    parts.push(new M3U8Parse.AttrList({
+                        duration: partDuration,
+                        uri: `"${firstSeqNo + segmentCount}-part${i}.ts"`
+                    }));
+                }
+
+                segments.push({
+                    parts: parts.length ? parts : undefined
+                });
+            }
+
+            const index = new M3U8Parse.M3U8Playlist({
+                first_seq_no: firstSeqNo,
+                target_duration: targetDuration,
+                part_info: partCount ? new M3U8Parse.AttrList({ 'part-target': partDuration }) : undefined,
+                segments,
+                ended
+            });
+
+            return index;
+        };
 
         before(() => {
 
@@ -469,30 +534,22 @@ describe('HlsSegmentReader()', () => {
                 debug: false
             });
 
-            const serveIndex = (request, h) => {
+            const serveLiveIndex = (request, h) => {
 
-                const segments = new Array(state.segmentCount);
-                for (let i = 0; i < segments.length; ++i) {
-                    segments[i] = {
-                        duration: 1,
-                        uri: '' + (state.firstSeqNo + i) + '.ts',
-                        title: ''
-                    };
+                let index;
+                if (serverState.index) {
+                    index = serverState.index(request.query);
                 }
-
-                const index = new M3U8Parse.M3U8Playlist({
-                    'first_seq_no': state.firstSeqNo,
-                    'target_duration': 0,
-                    segments,
-                    ended: state.ended
-                });
+                else {
+                    index = genIndex(serverState);
+                }
 
                 return h.response(index.toString()).type('application/vnd.apple.mpegURL');
             };
 
             const serveSegment = (request, h) => {
 
-                if (state.slow) {
+                if (serverState.slow) {
                     const slowStream = new Readable();
                     slowStream._read = () => {};
 
@@ -501,12 +558,27 @@ describe('HlsSegmentReader()', () => {
                     return h.response(slowStream).type('video/mp2t').bytes(30000);
                 }
 
-                const size = 5000 + parseInt(request.params.segment);
+                console.log('serve', request.params.msn, request.params.part, request.headers.range)
+
+                const size = ~~(5000 / (request.params.part === undefined ? 1 : serverState.partCount)) + parseInt(request.params.msn) + 100 * parseInt(request.params.part || 0);
                 return h.response(Buffer.alloc(size)).type('video/mp2t').bytes(size);
             };
 
-            liveServer.route({ method: 'GET', path: '/live/live.m3u8', handler: serveIndex });
-            liveServer.route({ method: 'GET', path: '/live/{segment}.ts', handler: serveSegment });
+            liveServer.route({
+                method: 'GET',
+                path: '/live/live.m3u8',
+                handler: serveLiveIndex,
+                options: {
+                    validate: {
+                        query: Joi.object({
+                            '_HLS_msn': Joi.number().integer().min(0).optional(),
+                            '_HLS_part': Joi.number().min(0).optional()
+                        }).with('_HLS_part', '_HLS_msn')
+                    }
+                }
+            });
+            liveServer.route({ method: 'GET', path: '/live/{msn}.ts', handler: serveSegment });
+            liveServer.route({ method: 'GET', path: '/live/{msn}-part{part}.ts', handler: serveSegment });
 
             return liveServer.start();
         });
@@ -516,21 +588,16 @@ describe('HlsSegmentReader()', () => {
             return liveServer.stop();
         });
 
-        beforeEach(() => {
-
-            state = { firstSeqNo: 0, segmentCount: 10 };
-        });
-
         it('handles a basic stream', async () => {
 
-            const r = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true });
+            const { reader, state } = prepareLiveReader();
             const segments = [];
 
-            for await (const obj of r) {
-                expect(obj.segment.seq).to.equal(segments.length);
+            for await (const obj of reader) {
+                expect(obj.segment.msn).to.equal(segments.length);
                 segments.push(obj);
 
-                if (obj.segment.seq > 5) {
+                if (obj.segment.msn > 5) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 5) {
                         state.ended = true;
@@ -544,13 +611,11 @@ describe('HlsSegmentReader()', () => {
 
         it('handles sequence number resets', async () => {
 
-            const r = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true });
+            const { reader, state } = prepareLiveReader({}, { firstSeqNo: 10 });
             const segments = [];
             let reset = false;
 
-            state.firstSeqNo = 10;
-
-            for await (const obj of r) {
+            for await (const obj of reader) {
                 segments.push(obj);
 
                 if (!reset) {
@@ -574,7 +639,7 @@ describe('HlsSegmentReader()', () => {
             }
 
             expect(segments.length).to.equal(11);
-            expect(segments[6].segment.seq).to.equal(0);
+            expect(segments[6].segment.msn).to.equal(0);
             expect(segments[5].segment.details.discontinuity).to.be.false();
             expect(segments[6].segment.details.discontinuity).to.be.true();
             expect(segments[7].segment.details.discontinuity).to.be.false();
@@ -582,14 +647,14 @@ describe('HlsSegmentReader()', () => {
 
         it('handles sequence number jumps', async () => {
 
-            const r = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true });
+            const { reader, state } = prepareLiveReader();
             const segments = [];
             let skipped = false;
 
-            for await (const obj of r) {
+            for await (const obj of reader) {
                 segments.push(obj);
 
-                if (!skipped && obj.segment.seq >= state.segmentCount - 1) {
+                if (!skipped && obj.segment.msn >= state.segmentCount - 1) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 5) {
                         state.firstSeqNo = 50;
@@ -597,7 +662,7 @@ describe('HlsSegmentReader()', () => {
                     }
                 }
 
-                if (skipped && obj.segment.seq > 55) {
+                if (skipped && obj.segment.msn > 55) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 55) {
                         state.ended = true;
@@ -607,7 +672,7 @@ describe('HlsSegmentReader()', () => {
             }
 
             expect(segments.length).to.equal(29);
-            expect(segments[14].segment.seq).to.equal(50);
+            expect(segments[14].segment.msn).to.equal(50);
             expect(segments[13].segment.details.discontinuity).to.be.false();
             expect(segments[14].segment.details.discontinuity).to.be.true();
             expect(segments[15].segment.details.discontinuity).to.be.false();
@@ -615,12 +680,10 @@ describe('HlsSegmentReader()', () => {
 
         it('aborts downloads that have been evicted from index', async () => {
 
-            const r = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { withData: true, fullStream: true });
+            const { reader, state } = prepareLiveReader({ withData: true }, { slow: true, targetDuration: 0 });
             const segments = [];
 
-            state.slow = true;
-
-            for await (const obj of r) {
+            for await (const obj of reader) {
                 segments.push(obj);
 
                 state.firstSeqNo++;
@@ -632,22 +695,194 @@ describe('HlsSegmentReader()', () => {
             expect(segments.length).to.equal(11);
             expect(segments[0].stream.destroyed).to.be.true();
 
-            r.abort();
+            reader.abort();
         });
 
         it('respects the maxStallTime option', async () => {
 
-            const r = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { maxStallTime: 5, fullStream: true });
-
-            state.segmentCount = 1;
+            const { reader } = prepareLiveReader({ maxStallTime: 5 }, { segmentCount: 1 });
 
             await expect((async () => {
 
-                for await (const obj of r) {
+                for await (const obj of reader) {
 
                     expect(obj).to.exist();
                 }
             })()).to.reject(Error, /Index update stalled/);
+        });
+
+        describe('with lowLatency=true', () => {
+
+            const prepareLlReader = function (readerOptions = {}, state = {}, indexGen) {
+
+                return prepareLiveReader({
+                    lowLatency: true,
+                    withData: true,
+                    fullStream: false,
+                    ...readerOptions
+                }, {
+                    partIndex: 0,
+                    partCount: 5,
+                    index: indexGen,
+                    ...state
+                });
+            };
+
+            const genLlIndex = function (query, state) {
+
+                // Return playlist with exactly the next part
+
+                if (!state.ended && query._HLS_msn && query._HLS_part !== undefined) {
+                    let msn = query._HLS_msn;
+                    let part = query._HLS_part + 1;
+                    if (part >= state.partCount) {
+                        msn++;
+                        part = 0;
+                    }
+
+                    state.firstSeqNo = msn - state.segmentCount;
+                    state.partIndex = part;
+                }
+
+                const index = genIndex(state);
+
+                index.server_control = new M3U8Parse.AttrList({
+                    'can-block-reload': 'YES',
+                    'part-hold-back': 3 * state.targetDuration / state.partCount
+                });
+
+                if (!state.ended) {
+                    if (state.end && state.end.msn === index.lastSeqNo() && state.end.part === index.getSegment(index.lastSeqNo()).parts.length) {
+                        index.ended = state.ended = true;
+                        return index;
+                    }
+
+                    state.partIndex = ~~state.partIndex + 1;
+                    if (state.partIndex >= state.partCount) {
+                        state.partIndex = 0;
+                        state.firstSeqNo++;
+                    }
+                }
+
+                return index;
+            };
+
+            const expectedBytes = function (segment) {
+
+                if (segment.details.parts) {
+                    return segment.details.parts.reduce((val, part, idx) => val + (1000 + segment.msn) + 100 * idx, 0);
+                }
+
+                return 5000 + segment.msn;
+            };
+
+            it('handles a basic low-latency stream', async () => {
+
+                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
+
+                const segments = [];
+                for await (const obj of reader) {
+                    expect(obj.segment.msn).to.equal(segments.length + 10);
+                    segments.push(obj);
+
+                    let bytes = 0;
+                    for await (const chunk of obj.stream) {
+                        bytes += chunk.length;
+                    }
+
+                    expect(bytes).to.equal(expectedBytes(obj.segment));
+                }
+
+                expect(segments.length).to.equal(11);
+                expect(segments[0].segment.details.parts).to.have.length(5);
+            });
+
+            it('handles a basic low-latency stream with initial full segment', async () => {
+
+                const { reader, state } = prepareLlReader({}, { partIndex: 1, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
+
+                const segments = [];
+                for await (const obj of reader) {
+                    expect(obj.segment.msn).to.equal(segments.length + 9);
+                    segments.push(obj);
+
+                    let bytes = 0;
+                    for await (const chunk of obj.stream) {
+                        bytes += chunk.length;
+                    }
+
+                    expect(bytes).to.equal(expectedBytes(obj.segment));
+                }
+
+                expect(segments.length).to.equal(12);
+                expect(segments[0].segment.details.parts).to.not.exist();
+            });
+
+            it('handles a basic low-latency stream using byteranges', async () => {
+
+                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => {
+
+                    const index = genLlIndex(query, state);
+                    const firstMsn = index.first_seq_no;
+                    for (let msn = firstMsn; msn <= index.lastSeqNo(); ++msn) {     // eslint-disable-line @hapi/hapi/for-loop
+                        const segment = index.getSegment(msn);
+                        if (segment.parts) {
+                            for (let j = 0; j < segment.parts.length; ++j) {
+                                const part = segment.parts[j];
+                                part.set('uri', `${msn}.ts`, 'string');
+                                part.set('byterange', { length: 800 + j, offset: j === 0 ? 0 : undefined }, 'byterange');
+                            }
+                        }
+                    }
+
+                    return index;
+                });
+
+                const segments = [];
+                for await (const obj of reader) {
+                    expect(obj.segment.msn).to.equal(segments.length + 10);
+                    segments.push(obj);
+
+                    let bytes = 0;
+                    for await (const chunk of obj.stream) {
+                        bytes += chunk.length;
+                    }
+
+                    // TODO:
+//                    expect(bytes).to.equal(expectedBytes(obj.segment));
+
+                    // TODO: validate range request was performed
+                }
+
+                expect(segments.length).to.equal(11);
+                expect(segments[0].segment.details.parts).to.have.length(5);
+            });
+
+            // TODO: mp4 with initial map
+            // TODO: part jumps
+            // TODO: segment jumps
+            // TODO: out of index stall
+
+/*            it('handles a ll stream', async () => {
+
+                const { reader, state } = prepareLlReader({ lowLatency: false }, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
+                const segments = [];
+
+                for await (const obj of reader) {
+                    expect(obj.segment.msn).to.equal(segments.length);
+                    segments.push(obj);
+
+                    let bytes = 0;
+                    for await (const chunk of obj.stream) {
+                        bytes += chunk.length;
+                    }
+
+                    expect(bytes).to.equal(expectedBytes(obj.segment));
+                }
+
+                console.log('!!!', segments.map((obj) => obj.segment))
+                expect(segments.length).to.equal(13);
+            });*/
         });
 
         // handles fullStream option
