@@ -1,20 +1,17 @@
-'use strict';
 
-/** @typedef { import('./segment-reader').HlsSegmentReader } HlsSegmentReader */
-/** @typedef { import('m3u8parse/lib/m3u8playlist').M3U8Segment } M3U8Segment } */
-/** @typedef { import('m3u8parse/lib/m3u8playlist').MediaPlaylist } MediaPlaylist */
-/** @typedef { import('m3u8parse/lib/m3u8playlist').M3U8IndependentSegment } M3U8IndependentSegment */
+import type { HlsSegmentReader } from './segment-reader';
+import type { M3U8Segment, MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
+import type { ReadableStream, FetchResult } from './helpers';
 
-const Stream = require('stream');
-const Url = require('url');
+import { Stream, finished } from 'stream';
 
-const Hoek = require('@hapi/hoek');
-const { M3U8Playlist, AttrList } = require('m3u8parse');
-const { Transform } = require('readable-stream');
+import { assert as hoekAssert } from '@hapi/hoek';
+import { AttrList } from 'm3u8parse/lib/attrlist';
+import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist';
+import { Transform } from 'readable-stream';
 
-const Helpers = require('./helpers');
-const SegmentDownloader = require('./segment-downloader');
-const HlsSegmentObject = require('./segment-object');
+import { SegmentDownloader } from './segment-downloader';
+import { HlsSegmentObject } from './segment-object';
 
 try {
     const MimeTypes = require('mime-types');
@@ -29,15 +26,11 @@ catch (err) {
     console.error('Failed to inject extra types', err);
 }
 
-/**
- * @param {any} condition
- * @param {any[]} args
- * @return {asserts condition}
- */
-// eslint-disable-next-line func-style
-function assert(condition, ...args) {
 
-    Hoek.assert(condition, ...args);
+// eslint-disable-next-line func-style
+function assert(condition: any, ...args: any[]): asserts condition {
+
+    hoekAssert(condition, ...args);
 }
 
 
@@ -59,26 +52,22 @@ const internals = {
         'application/mp4'
     ]),
 
-    /**
-     * @param {AttrList} [m1]
-     * @param {AttrList} [m2]
-     */
-    isSameMap(m1, m2) {
+    isSameMap(m1: AttrList, m2: AttrList) {
 
         return m1 && m2 && m1.get('uri') === m2.get('uri') && m1.get('byterange') === m2.get('byterange');
     }
 };
 
+export type HlsSegmentStreamerOptions = {
+    highWaterMark?: number;
+    withData?: boolean; // default true
+    lowLatency?: boolean; // default true
+}
 
-/**
- * @typedef HlsSegmentStreamerOptions
- * @type {object}
- * @property {number} [highWaterMark=0]
- * @property {boolean} [withData=true]
- * @property {boolean} [lowLatency=true]
- */
+export class HlsSegmentStreamer extends Transform {
 
-exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
+    withData: boolean;
+    lowLatency: boolean;
 
     #readState = {
         /** @type {Set<number>} */
@@ -95,39 +84,30 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
         discont: false
     };
 
-    /** @type {Map<number,HlsSegmentObject & { stream?: Helpers.ReadableStream & { addParts?: function, addHint?: function }}>} */
-    #active = new Map(); // used to stop buffering on expired segments
+    #active = new Map<number, HlsSegmentObject & { stream?: ReadableStream & { addParts?: Function, addHint?: Function }}>(); // used to stop buffering on expired segments
+    #downloader: SegmentDownloader;
+    #reader?: HlsSegmentReader;
 
-    /** @type {SegmentDownloader} */
-    #downloader;
+    constructor(reader?: HlsSegmentReader, options: HlsSegmentStreamerOptions = {}) {
 
-    /** @type {HlsSegmentReader | undefined} */
-    #reader;
-
-    /**
-     * @param {HlsSegmentReader | undefined} [reader]
-     * @param {HlsSegmentStreamerOptions} [options]
-     */
-    constructor(reader, options = {}) {
-
-        super({ objectMode: true, highWaterMark: /** @type {any} */ (reader || {}).highWaterMark || options.highWaterMark || 0 });
+        super({ objectMode: true, highWaterMark: (reader || {} as any).highWaterMark || options.highWaterMark || 0 });
 
         if (typeof reader === 'object' && !(reader instanceof Stream)) {
             options = /** @type {HlsSegmentStreamerOptions} */(reader);
             reader = undefined;
         }
 
-        this.withData = options.withData === undefined ? true : !!options.withData;
-        this.lowLatency = options.lowLatency === undefined ? true : !!options.lowLatency;
+        this.withData = options.withData ?? true;
+        this.lowLatency = options.lowLatency ?? true;
 
         this.#downloader = new SegmentDownloader({ probe: !this.withData });
 
-        this.on('pipe', (src) => {
+        this.on('pipe', (src: HlsSegmentReader) => {
 
             assert(!this.#reader, 'Only one piped source is supported');
 
             this.#reader = src;
-            src.on('index', (index) => {
+            src.on('index', (index: M3U8Playlist) => {
 
                 this.emit('index', index);
             });
@@ -165,11 +145,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
         }
     }
 
-    /**
-     * @param {?Error} err
-     * @param {*} cb
-     */
-    _destroy(err, cb) {
+    _destroy(err: Error | null, cb: any) {
 
         // FIXME: is reader unpiped first???
         if (this.#reader && !this.#reader.destroyed) {
@@ -191,10 +167,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
         return internals.segmentMimeTypes;
     }
 
-    /**
-     * @param {Helpers.FetchResult['meta']} meta
-     */
-    validateSegmentMeta(meta) {
+    validateSegmentMeta(meta: FetchResult['meta']) {
 
         // Check for valid mime type
 
@@ -203,12 +176,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
         }
     }
 
-    /**
-     * @param {{ msn: number, entry: M3U8IndependentSegment }} segment
-     * @param {*} _
-     * @param {(err?: Error) => void} done
-     */
-    _transform(segment, _, done) {
+    _transform(segment: { msn: number, entry: M3U8IndependentSegment }, _: unknown, done: (err?: Error) => void) {
 
         assert(typeof segment.msn === 'number' && segment.entry, 'Only segment-reader segments are supported');
 
@@ -217,12 +185,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
 
     // Private methods
 
-    /**
-     * @param {{ msn: number, entry: M3U8IndependentSegment }} segment
-     *
-     * @return {Promise<HlsSegmentObject | null>}
-     */
-    async _process(segment) {
+    async _process(segment: { msn: number, entry: M3U8IndependentSegment }): Promise<HlsSegmentObject | null> {
 
         // Update active token list
 
@@ -237,10 +200,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
 
         // At this point object.stream has only been readied / opened
 
-        /**
-         * @param {Error} [err]
-         */
-        const drop = function (err) {
+        const drop = function (err?: Error) {
 
             if (object.stream) {
                 object.stream.destroy(err);
@@ -271,7 +231,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
 
         if (object.stream) {
             this.#active.set(segment.msn, object);
-            Stream.finished(object.stream, () => this.#active.delete(segment.msn));
+            finished(object.stream, () => this.#active.delete(segment.msn));
         }
 
         return object;
@@ -281,7 +241,7 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
      * @param {SegmentPointer} ptr
      * @param {M3U8IndependentSegment} segment
      */
-    async _fetchFrom(ptr, segment) {
+    async _fetchFrom(ptr, segment: M3U8IndependentSegment) {
 
         let uri = segment.uri;
         let byterange = segment.byterange;
@@ -339,22 +299,16 @@ exports.HlsSegmentStreamer = class HlsSegmentStreamer extends Transform {
         }
     }
 
-    /**
-     * @param {number} msn
-     */
-    _tokenForMsn(msn) {
+    _tokenForMsn(msn: number) {
 
         return msn; // TODO: handle start over
     }
 
-    /**
-     * @param {MediaPlaylist | undefined} index
-     */
-    _updateTokens(index) {
+    _updateTokens(index: MediaPlaylist) {
 
         const old = this.#readState.indexTokens;
 
-        const current = new Set();
+        const current = new Set<number>();
         for (let i = index.startSeqNo(true); i < index.lastSeqNo(true); ++i) {
             const token = this._tokenForMsn(i);
             current.add(token);

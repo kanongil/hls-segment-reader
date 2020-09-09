@@ -1,80 +1,60 @@
-'use strict';
+import { finished } from 'stream';
+import { promisify } from 'util';
 
-const Stream = require('stream');
-const Util = require('util');
+import { applyToDefaults, assert, ignore } from '@hapi/hoek';
+import { PassThrough } from 'readable-stream';
 
-const Hoek = require('@hapi/hoek');
-const { PassThrough } = require('readable-stream');
+import { Deferred, performFetch } from './helpers';
+import type { Byterange, FetchResult, ReadableStream } from './helpers';
 
-const Helpers = require('./helpers');
 
 const internals = {
     defaults: {
         probe: false
     },
-    streamFinished: Util.promisify(Stream.finished)
+    streamFinished: promisify(finished)
 };
 
-/**
- * @typedef Part
- * @type {object}
- * @property {string} uri
- * @property {Required<Helpers.Byterange> | undefined} [byterange]
- * @property {boolean | undefined} [final]
- * @property {Hint | undefined} [hint]
- */
 
-/**
- * @typedef Hint
- * @type {object}
- * @property {{ uri: string, type: 'PART' | 'MAP', byterange?: Helpers.Byterange }} part
- * @property {ExtendedFetch} fetch
- */
+type ExtendedFetch = Promise<Required<FetchResult> & { part: Part }> & { abort: () => void };
 
-/**
- * @typedef ExtendedFetch
- * @type {Promise<Required<Helpers.FetchResult> & { part: Part }> & { abort: () => void }}
- */
+export type Hint = {
+    part: { uri: string, type: 'PART' | 'MAP', byterange?: Byterange };
+    fetch: ExtendedFetch
+};
+
+export type Part = {
+    uri: string;
+    byterange?: Byterange;
+    final?: boolean;
+    hint?: Hint;
+};
+
 
 class PartStream extends PassThrough {
 
-    /** @type { Part[] } */
-    #queuedParts = [];
+    #queuedParts: Part[] = [];
+    #fetches: ExtendedFetch[] = [];
+    #meta: Deferred<FetchResult['meta']> & { queued: boolean };
+    #fetchTimer?: NodeJS.Immediate;
+    #hint?: Hint;
 
-    /** @type { ExtendedFetch[] } */
-    #fetches = [];
-
-    /** @type {Helpers.Deferred<Helpers.FetchResult['meta']> & { queued: boolean }} */
-    #meta;
-
-    /** @type {ReturnType<setImmediate> | undefined} */
-    #fetchTimer;
-
-    /** @type {Hint | undefined} */
-    #hint;
-
-    /**
-     * @param {Part[]} parts
-     */
-    constructor(parts) {
+    constructor(parts: Part[]) {
 
         super();
 
-        this.#meta = Object.assign(new Helpers.Deferred(), { queued: false });
+        this.#meta = Object.assign(new Deferred<FetchResult['meta']>(), { queued: false });
 
         this.addParts(parts);
     }
 
-    /**
-     * @param {Part[]} parts
-     */
-    addParts(parts, final = false) {
+    addParts(parts: Part[], final = false) {
 
         if (!Array.isArray(parts)) {
             throw new TypeError('Parts must be an array');
         }
 
-        Hoek.assert(this.writable, 'Stream cannot be closed');
+        assert(this.writable, 'Stream cannot be closed');
 
         if (this.#fetchTimer) {
             clearImmediate(this.#fetchTimer);
@@ -82,15 +62,14 @@ class PartStream extends PassThrough {
 
         this.#queuedParts.push(...parts);
 
-        /** @type {(hint?: Hint) => void} */
-        const start = (hint) => {
+        const start = (hint?: Hint): void => {
 
             const fetches = this._mergeParts(this.#queuedParts, { final, hint }).map((part) => {
 
                 const resolveMeta = !this.#meta.queued;
                 this.#meta.queued = false;
 
-                const fetch = part.hint ? part.hint.fetch : /** @type {ExtendedFetch} */ (Helpers.fetch(part.uri, { byterange: part.byterange }));
+                const fetch = part.hint ? part.hint.fetch : performFetch(part.uri, { byterange: part.byterange }) as ExtendedFetch;
 
                 const promise = Object.assign(fetch.then((fetchResult) => {
 
@@ -117,10 +96,7 @@ class PartStream extends PassThrough {
         this.#hint = undefined;
     }
 
-    /**
-     * @param {Hint['part']} [hint]
-     */
-    addHint(hint) {
+    addHint(hint?: Hint['part']): void {
 
         if (hint && hint.type !== 'PART') {
             return;         // TODO: support MAP hints
@@ -133,23 +109,19 @@ class PartStream extends PassThrough {
             }
 
             if (hint) {
-                const fetch = /** @type {ExtendedFetch} */ (Helpers.fetch(hint.uri, { byterange: hint.byterange }));
-                fetch.catch(Hoek.ignore);
+                const fetch = performFetch(hint.uri, { byterange: hint.byterange }) as ExtendedFetch;
+                fetch.catch(ignore);
                 this.#hint = { part: hint, fetch };
             }
         }
     }
 
-    /**
-     * @param {?Error} err
-     * @param {*} cb
-     */
-    _destroy(err, cb) {
+    /*protected*/ _destroy(err: Error | null, cb: any) {
 
         const fetches = this.#fetches;
         this.#fetches = [];
         for (const fetch of fetches) {
-            //fetch.catch(Hoek.ignore);
+            //fetch.catch(ignore);
             fetch.abort();
         }
 
@@ -159,11 +131,7 @@ class PartStream extends PassThrough {
         super._destroy(err, cb);
     }
 
-    /**
-     * @param {Part | Hint['part'] | undefined} part
-     * @param {Hint | undefined} hint
-     */
-    _isHinted(part, hint) {
+    private _isHinted(part?: Part | Hint['part'], hint?: Hint) {
 
         if (!part || !hint) {
             return false;
@@ -193,10 +161,7 @@ class PartStream extends PassThrough {
                part.byterange.offset === hint.part.byterange.length;
     }
 
-    /**
-     * @param {ExtendedFetch[]} fetches
-     */
-    async _feedFetches(fetches) {
+    async _feedFetches(fetches: ExtendedFetch[]) {
 
         const active = this.#fetches.length > 0;
         this.#fetches.push(...fetches);
@@ -216,11 +181,7 @@ class PartStream extends PassThrough {
         return this.#meta.promise;
     }
 
-    /**
-     * @param {Part[]} parts
-     * @param {{ final: boolean, hint?: Hint }} options
-     */
-    _mergeParts(parts, { final, hint }) {
+    _mergeParts(parts: Part[], { final, hint }: { final: boolean, hint?: Hint }): Part[] {
 
         if (hint) {
             for (const part of parts) {
@@ -259,11 +220,7 @@ class PartStream extends PassThrough {
         return merged;
     }
 
-    /**
-     * @param {Helpers.ReadableStream} stream
-     * @param {Part} part
-     */
-    _feedPart(stream, part) {
+    _feedPart(stream: ReadableStream, part: Part) {
 
         // TODO: only feed part.byterange.length in case it is longer??
 
@@ -273,47 +230,31 @@ class PartStream extends PassThrough {
 }
 
 
-/** @typedef {object | string | number } FetchToken */
+type FetchToken = object | string | number;
 
+export class SegmentDownloader {
 
-module.exports = class SegmentDownloader {
+    probe: boolean;
 
-    /** @type {Map<FetchToken, ReturnType<Helpers.fetch>>} */
-    #fetches = new Map();
+    #fetches = new Map<FetchToken, ReturnType<typeof performFetch>>();
 
-    /**
-     * @param {{ probe?: boolean }} options
-     */
-    constructor(options) {
+    constructor(options: { probe?: boolean }) {
 
-        options = Hoek.applyToDefaults(internals.defaults, options);
+        options = applyToDefaults(internals.defaults, options);
 
         this.probe = !!options.probe;
     }
 
-    /**
-     * @param {FetchToken} token
-     * @param {string} uri
-     * @param {Required<Helpers.Byterange>} [byterange]
-     *
-     * @return {ReturnType<Helpers.fetch>}
-     */
-    fetchSegment(token, uri, byterange) {
+    fetchSegment(token: FetchToken, uri: string, byterange?: Required<Byterange>): ReturnType<typeof performFetch> {
 
-        const promise = Helpers.fetch(uri, { byterange, probe: this.probe });
+        const promise = performFetch(uri, { byterange, probe: this.probe });
         this._startTracking(token, promise);
         return promise;
     }
 
-    /**
-     * @param {FetchToken} token
-     * @param {Part[]} parts
-     *
-     * @return {ReturnType<Helpers.fetch>}
-     */
-    fetchParts(token, parts, final = false) {
+    fetchParts(token: FetchToken, parts: Part[], final = false): ReturnType<typeof performFetch> {
 
-        Hoek.assert(!this.probe, 'Use fetchSegment');
+        assert(!this.probe, 'Use fetchSegment');
 
         const stream = new PartStream(parts);
         if (final) {
@@ -353,13 +294,9 @@ module.exports = class SegmentDownloader {
         }
     }
 
-    /**
-     * @param {FetchToken} token
-     * @param {ReturnType<Helpers.fetch>} promise
-     */
-    _startTracking(token, promise) {
+    _startTracking(token: FetchToken, promise: ReturnType<typeof performFetch>) {
 
-        Hoek.assert(!this.#fetches.has(token), 'A token can only be tracked once');
+        assert(!this.#fetches.has(token), 'A token can only be tracked once');
 
         // Setup auto-untracking
 
@@ -373,7 +310,7 @@ module.exports = class SegmentDownloader {
                 return;         // It has already been aborted
             }
 
-            Stream.finished(stream, () => this._stopTracking(token));
+            finished(stream, () => this._stopTracking(token));
         }).catch((/*err*/) => {
 
             this._stopTracking(token);
@@ -382,11 +319,8 @@ module.exports = class SegmentDownloader {
         this.#fetches.set(token, promise);
     }
 
-    /**
-     * @param {FetchToken} token
-     */
-    _stopTracking(token) {
+    _stopTracking(token: FetchToken) {
 
         this.#fetches.delete(token);
     }
-};
+}

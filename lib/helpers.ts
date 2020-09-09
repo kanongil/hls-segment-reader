@@ -1,79 +1,65 @@
-'use strict';
+import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
+export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void, destroyed: boolean };
 
-/** @typedef { import('m3u8parse/lib/m3u8playlist').MediaPlaylist } MediaPlaylist */
+import { watch } from 'fs';
+import { URL, fileURLToPath } from 'url';
 
-const Fs = require('fs');
-const Url = require('url');
+const UriStream = require('uristream') as (uri: string, options: {}) => ReadableStream;
 
-/**
- * @typedef ReadableStream
- * @type {NodeJS.ReadableStream & { destroy(err?: Error) : void, destroyed: boolean }}
- */
+import { AttrList } from 'm3u8parse';
 
-/**
- * @type {(uri: Url.URL | string, options: {}) => ReadableStream}
- */
-// @ts-ignore
-const UriStream = require('uristream');
-const { AttrList } = require('m3u8parse');
+namespace Uristream {
+    export type Meta = {
+        url: string;
+        mime: string;
+        size: number;
+        modified: number | null;
+        etag?: string;
+    }
+}
 
-/**
- * @typedef Uristream.Meta
- * @type {object}
- * @property {string} url
- * @property {string} mime
- * @property {number} size
- * @property {?number} modified
- * @property {string | undefined} [etag]
- */
+export type Byterange = {
+    offset: number;
+    length?: number;
+}
 
-/**
- * @typedef Byterange
- * @type {object}
- * @property {number} offset
- * @property {number | undefined} [length]
-*/
-
-/**
- * @typedef FetchResult
- * @type {object}
- * @property {Uristream.Meta} meta
- * @property {ReadableStream | undefined} [stream]
- */
+export type FetchResult = {
+    meta: Uristream.Meta;
+    stream?: ReadableStream;
+}
 
 
 const internals = {
-    fetchBuffer: 10 * 1000 * 1000,
-    nothing: Symbol('nothing')
+    fetchBuffer: 10 * 1000 * 1000
 };
 
-/**
- * @template T
- */
-exports.Deferred = class {
+
+export class Deferred<T> {
+
+    promise: Promise<T>;
+    resolve: (arg: T) => void = undefined as any;
+    reject: (err: Error) => void = undefined as any;
 
     constructor() {
 
-        /** @type {Promise<T>} */
-        this.promise = new Promise((resolve, reject) => {
+        this.promise = new Promise<T>((resolve, reject) => {
 
-            /** @type {(arg: T) => void} */
             this.resolve = resolve;
-
-            /** @type {(err: Error) => void} */
             this.reject = reject;
         });
     }
+}
+
+
+type AbortablePromise<T> = Promise<T> & { abort: () => void }
+
+type FetchOptions = {
+    byterange?: Byterange;
+    probe?: boolean;
+    timeout?: number;
 };
 
-
-/**
- * @param {Url.URL | string} uri
- * @param {{ byterange?: Byterange, probe?: boolean, timeout?: number}} options
- *
- * @return {Promise<FetchResult> & {abort: () => void }}
- */
-exports.fetch = function (uri, { byterange, probe = false, timeout } = {}) {
+export const performFetch = function (uri: URL | string, { byterange, probe = false, timeout }: FetchOptions = {}): AbortablePromise<FetchResult> {
 
     const streamOptions = Object.assign({
         probe,
@@ -85,19 +71,11 @@ exports.fetch = function (uri, { byterange, probe = false, timeout } = {}) {
         end: byterange.length !== undefined ? byterange.offset + byterange.length - 1 : undefined
     } : undefined);
 
-    const stream = UriStream(uri, streamOptions);
+    const stream = UriStream(uri.toString(), streamOptions);
 
-    /**
-     * @type ReturnType<exports.fetch>
-     */
-    // @ts-ignore
-    const promise = new Promise((resolve, reject) => {
+    const promise: ReturnType<typeof performFetch> = new Promise((resolve, reject) => {
 
-        /**
-         * @param {?Error} [err]
-         * @param {Uristream.Meta} [meta]
-         */
-        const doFinish = (err, meta) => {
+        const doFinish = (err: Error | null, meta?: Uristream.Meta) => {
 
             stream.removeListener('meta', onMeta);
             stream.removeListener('end', onFail);
@@ -116,20 +94,14 @@ exports.fetch = function (uri, { byterange, probe = false, timeout } = {}) {
             return err ? reject(err) : resolve(result);
         };
 
-        /**
-         * @param {Uristream.Meta} meta
-         */
-        const onMeta = (meta) => {
+        const onMeta = (meta: Uristream.Meta) => {
 
-            meta = Object.assign({}, meta, (byterange && byterange.length !== undefined) ? { size: byterange.length } : undefined);
+            meta = Object.assign({}, meta, byterange?.length !== undefined ? { size: byterange.length } : undefined);
 
             return doFinish(null, meta);
         };
 
-        /**
-         * @param {Error} [err]
-         */
-        const onFail = (err) => {
+        const onFail = (err?: Error) => {
 
             if (!err) {
                 err = new Error('No metadata');
@@ -141,7 +113,7 @@ exports.fetch = function (uri, { byterange, probe = false, timeout } = {}) {
         stream.on('meta', onMeta);
         stream.on('end', onFail);
         stream.on('error', onFail);
-    });
+    }) as any;
 
     promise.abort = () => !stream.destroyed && stream.destroy(new Error('Aborted'));
 
@@ -149,55 +121,44 @@ exports.fetch = function (uri, { byterange, probe = false, timeout } = {}) {
 };
 
 
-exports.ParsedPlaylist = class {
+export class ParsedPlaylist {
 
-    /**
-     * @param {MediaPlaylist} index
-     */
-    constructor(index) {
+    index: MediaPlaylist;
+
+    constructor(index: MediaPlaylist) {
 
         this.index = index;
     }
 
-    startMsn(full = false) {
+    startMsn(full = false): number {
 
         return this.index.startSeqNo(full);
     }
 
-    lastMsn(includePartial = false) {
+    lastMsn(includePartial = false): number {
 
         return this.index.lastSeqNo(includePartial);
     }
 
-    /**
-     * @param {Date} date
-     */
-    msnForDate(date) {
+    msnForDate(date: Date): number {
 
         return this.index.seqNoForDate(date, true);
     }
 
-    /**
-     * @param {number} msn
-     * @param {string} baseUri
-     */
-    getResolvedSegment(msn, baseUri) {
+    getResolvedSegment(msn: number, baseUri: URL | string): M3U8IndependentSegment | undefined {
 
-        const segment = this.index.getSegment(msn, true);
+        const segment = this.index.getSegment(msn, true) ?? undefined;
         if (segment) {
             segment.rewriteUris((uri) => {
 
-                return uri !== undefined ? new Url.URL(uri, baseUri).href : uri;
+                return uri !== undefined ? new URL(uri, baseUri).href : uri;
             });
         }
 
         return segment;
     }
 
-    /**
-     * @param {MediaPlaylist} index
-     */
-    isSameHead(index, includePartial = false) {
+    isSameHead(index: MediaPlaylist, includePartial = false): boolean {
 
         const sameMsn = this.lastMsn(includePartial) === index.lastSeqNo(includePartial);
         if (!sameMsn || !includePartial) {
@@ -210,10 +171,7 @@ exports.ParsedPlaylist = class {
                 (index.segments[index.segments.length - 1].parts || []).length);
     }
 
-    /**
-     * @return {{ msn: number, part?: number }} 
-     */
-    nextHead(includePartial = false) {
+    nextHead(includePartial = false): { msn: number, part?: number } {
 
         if (includePartial && this.partTarget) {
             const lastSegment = this.segments.length ? this.segments[this.segments.length - 1] : { uri: undefined, parts: undefined };
@@ -251,9 +209,8 @@ exports.ParsedPlaylist = class {
 
     get preloadHints() {
 
-        /** @typedef {{ uri: string, byterange?: { offset: number, length?: number } }} PartData */
-        /** @type {{ part?: PartData, map?: PartData }} */
-        const hints = {};
+        type PartData = { uri: string, byterange?: Byterange };
+        const hints: { part?: PartData, map?: PartData } = {};
 
         const list = this.index.meta.preload_hints;
         for (const attrs of list || []) {
@@ -271,52 +228,41 @@ exports.ParsedPlaylist = class {
 
         return hints;
     }
-};
+}
 
 
-exports.FsWatcher = class {
+type FSWatcherEvents = 'rename' | 'change';
 
-    /** @type {'rename' | 'change' | undefined} */
-    #last;
+export class FsWatcher {
 
-    /** @type {Error | undefined} */
-    #error;
+    #watcher: ReturnType<typeof watch>;
+    #last?: FSWatcherEvents;
+    #error?: Error;
+    #deferred?: Deferred<FSWatcherEvents>;
 
-    /** @type {?exports.Deferred<'rename' | 'change'>} */
-    #deferred = null;
+    constructor(uri: URL | string) {
 
-    /**
-     * @param {Url.URL | string} uri
-     */
-    constructor(uri) {
-
-        /**
-         * @param {'rename' | 'change'} eventType
-         */
-        const change = (eventType) => {
+        const change = (eventType: FSWatcherEvents) => {
 
             if (this.#deferred) {
                 this.#deferred.resolve(eventType);
-                this.#deferred = null;
+                this.#deferred = undefined;
             }
 
             this.#last = eventType;
         };
 
-        /**
-         * @param {Error} err
-         */
-        const error = (err) => {
+        const error = (err: Error) => {
 
             if (this.#deferred) {
                 this.#deferred.reject(err);
-                this.#deferred = null;
+                this.#deferred = undefined;
             }
 
             this.#error = err;
         };
 
-        const watcher = this.watcher = Fs.watch(Url.fileURLToPath(uri), { persistent: false });
+        const watcher = this.#watcher = watch(fileURLToPath(uri), { persistent: false });
 
         watcher.on('change', change);
         watcher.on('error', error);
@@ -342,20 +288,20 @@ exports.FsWatcher = class {
             return last;
         }
 
-        this.#deferred = new exports.Deferred();
+        this.#deferred = new Deferred();
 
         return this.#deferred.promise;
     }
 
-    close() {
+    close(): void {
 
         if (!this.#error) {
-            this.watcher.close();
+            this.#watcher.close();
 
             if (this.#deferred) {
                 this.#deferred.reject(new Error('closed'));
-                this.#deferred = null;
+                this.#deferred = undefined;
             }
         }
     }
-};
+}

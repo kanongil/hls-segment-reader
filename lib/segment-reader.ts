@@ -1,30 +1,34 @@
-'use strict';
+import type { Stream } from 'stream';
+import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
+import type { FetchResult } from './helpers';
 
-/** @typedef { import('m3u8parse/lib/m3u8playlist').MediaPlaylist } MediaPlaylist */
-/** @typedef { import('m3u8parse/lib/m3u8playlist').M3U8IndependentSegment } M3U8IndependentSegment */
+import { hrtime } from 'process';
+import { URL } from 'url';
 
-const Process = require('process');
-const Url = require('url');
+import { Boom } from '@hapi/boom';
+import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
+import { AttrList } from 'm3u8parse/lib/attrlist';
+import M3U8Parse, { ParserError } from 'm3u8parse/lib/m3u8parse';
+import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist'; // TODO: import from m3u8parse
+import { Readable } from 'readable-stream';
 
-const Boom = require('@hapi/boom');
-const Hoek = require('@hapi/hoek');
-const M3U8Parse = require('m3u8parse');
-const { M3U8Playlist, AttrList, ParserError } = require('m3u8parse');
-const Readable = require('readable-stream');
-
-const Helpers = require('./helpers');
+import { ParsedPlaylist, FsWatcher, performFetch } from './helpers';
 
 
-/**
- * @param {any} condition
- * @param {any[]} args
- * @return {asserts condition}
- */
 // eslint-disable-next-line func-style
-function assert(condition, ...args) {
+function assert(condition: any, ...args: any[]): asserts condition {
 
-    Hoek.assert(condition, ...args);
+    hoekAssert(condition, ...args);
 }
+
+
+type Hint = {
+    uri: string,
+    byterange?: {
+        offset: number,
+        length?: number
+    }
+};
 
 
 const internals = {
@@ -34,11 +38,7 @@ const internals = {
         'audio/mpegurl'
     ]),
 
-    /**
-     * @param {{ uri: string, byterange?: { offset: number, length?: number } }} h1
-     * @param {{ uri: string, byterange?: { offset: number, length?: number } }} h2
-     */
-    isSameHint(h1, h2) {
+    isSameHint(h1: Hint, h2: Hint): boolean {
 
         if (h1.uri !== h2.uri) {
             return false;
@@ -59,59 +59,50 @@ const internals = {
 };
 
 
-const SegmentPointer = class {
+class SegmentPointer {
 
-    /**
-     * @param {number} msn
-     * @param {number | undefined} part
-     */
-    constructor(msn = -1, part = undefined) {
+    msn: number;
+    part?: number;
+
+    constructor(msn = -1, part?: number) {
 
         this.msn = +msn;
         this.part = part;
     }
 
-    next() {
+    next(): SegmentPointer {
 
         return new SegmentPointer(this.msn + 1, this.part === undefined ? undefined : 0);
     }
 
-    isEmpty() {
+    isEmpty(): boolean {
 
         return this.msn < 0;
     }
-};
+}
 
 
-exports.HlsReaderObject = class HlsReaderObject {
+export class HlsReaderObject {
 
-    /** @type {((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void) | undefined} */
-    onUpdate;
+    readonly msn: number;
 
-    /** @type {M3U8IndependentSegment} */
-    #entry;
+    onUpdate?: ((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void);
 
+    #entry: M3U8IndependentSegment;
     #closed = false;
 
-    /**
-     * @param {number} msn
-     * @param {M3U8IndependentSegment} segment
-     */
-    constructor(msn, segment) {
+    constructor(msn: number, segment: M3U8IndependentSegment) {
 
         this.msn = msn;
         this.#entry = segment;
     }
 
-    get entry() {
+    get entry(): M3U8IndependentSegment {
 
         return this.#entry;
     }
 
-    /**
-     * @param {M3U8IndependentSegment} entry
-     */
-    set entry(entry) {
+    set entry(entry: M3U8IndependentSegment) {
 
         assert(!this.closed);
 
@@ -127,12 +118,12 @@ exports.HlsReaderObject = class HlsReaderObject {
         }
     }
 
-    get closed() {
+    get closed(): boolean {
 
         return this.#closed;
     }
 
-    _abandon() {
+    _abandon(): void {
 
         if (!this.#closed && this.onUpdate) {
             process.nextTick(this.onUpdate.bind(this, this.#entry));
@@ -140,99 +131,97 @@ exports.HlsReaderObject = class HlsReaderObject {
 
         this.#closed = true;
     }
+}
+
+export type HlsSegmentReaderOptions = {
+    /** Start from first segment, or use stream start */
+    fullStream?: boolean;
+
+    /** True to handle LL-HLS streams */
+    lowLatency?: boolean;
+
+    startDate?: Date;
+    stopDate?: Date;
+
+    maxStallTime?: number;
+
+    extensions?: { [K: string]: boolean }
 };
 
 
-/**
- * @typedef HlsSegmentReaderOptions
- * @type {object}
- * @property {boolean} [fullStream=false] - Start from first segment, or use stream start
- * @property {boolean} [lowLatency=false] - True to handle LL-HLS streams
- * @property {Date} [startDate]
- * @property {Date} [stopDate]
- * @property {number} [maxStallTime=Infinity]
- * @property {{ [K: string]: boolean }} [extensions]
- */
+import { TypedReadable, ReadableEvents } from './typed-readable';
+
+interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
+    index: (index: M3U8Playlist) => void;
+}
+
 
 /**
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
+export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentReaderEvents> {
 
-    static recoverableCodes = new Set([
+    static readonly recoverableCodes = new Set<number>([
         404, // Not Found
         408, // Request Timeout
         425, // Too Early
         429 // Too Many Requests
     ]);
 
+    readonly url: URL;
+    baseUrl: string;
+    readonly fullStream: boolean;
+    readonly lowLatency: boolean;
+    readonly startDate: Date | null;
+    readonly stopDate: Date | null;
+    readonly stallAfterMs: number;
+    readonly extensions: HlsSegmentReaderOptions['extensions'];
+
     #next = new SegmentPointer();
     #discont = false;
+    #indexStalledAt: bigint | null = null;
+    #index?: M3U8Playlist;
+    #playlist?: ParsedPlaylist;
+    #current: HlsReaderObject | null = null;
+    #currentHints: ParsedPlaylist['preloadHints'] = {};
+    #nextUpdate?: Promise<void>;
+    #fetch?: ReturnType<typeof performFetch>;
+    #watcher?: FsWatcher;
 
-    /** @type {bigint | null} */
-    #indexStalledAt = null;
-
-    /** @type {M3U8Playlist | undefined} */
-    #index;
-
-    /** @type {Helpers.ParsedPlaylist | undefined} */
-    #playlist;
-
-    /** @type {?exports.HlsReaderObject} */
-    #current = null;
-
-    /** @type {Helpers.ParsedPlaylist['preloadHints']} */
-    #currentHints = {};
-
-    /** @type {Promise<void> | undefined} */
-    #nextUpdate;
-
-    /** @type {ReturnType<Helpers.fetch> | undefined} */
-    #fetch;
-
-    /** @type {Helpers.FsWatcher | undefined}  */
-    #watcher;
-
-    /**
-     * @param {string} src
-     * @param {HlsSegmentReaderOptions} [options]
-     */
-    constructor(src, options = {}) {
+    constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
         super({ objectMode: true, highWaterMark: 0 });
 
-        this.url = new Url.URL(src);
+        this.url = new URL(src);
         this.baseUrl = src;
 
         this.fullStream = !!options.fullStream;
         this.lowLatency = !!options.lowLatency;
 
-        // dates are inclusive
+        // Dates are inclusive
+
         this.startDate = options.startDate ? new Date(options.startDate) : null;
         this.stopDate = options.stopDate ? new Date(options.stopDate) : null;
 
-        this.stallAfterMs = options.maxStallTime || Infinity;
+        this.stallAfterMs = options.maxStallTime ?? Infinity;
 
-        this.extensions = options.extensions || {};
+        this.extensions = options.extensions ?? {};
 
         this._keepIndexUpdated();
     }
 
-    get index() {
+    get index(): M3U8Playlist | undefined {
 
         return this.#index;
     }
 
-    get indexMimeTypes() {
+    get indexMimeTypes(): Set<string> {
 
         return internals.indexMimeTypes;
     }
 
-    /**
-     * @param {Helpers.FetchResult['meta']} meta
-     */
-    validateIndexMeta(meta) {
+    validateIndexMeta(meta: FetchResult['meta']): void | never {
 
         // Check for valid mime type
 
@@ -249,14 +238,12 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
      *
      * The test is quite lenient since this will only be called for resources that have previously
      * been accessed without an error.
-     *
-     * @param {Error} err
      */
-    isRecoverableUpdateError(err) {
+    isRecoverableUpdateError(err: Error) {
 
         const { recoverableCodes } = HlsSegmentReader;
 
-        if (err instanceof Boom.Boom) {
+        if (err instanceof Boom) {
             if (err.isServer || recoverableCodes.has(err.output.statusCode)) {
                 return true;
             }
@@ -266,7 +253,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
             return true;
         }
 
-        if (/** @type {*} */ (err).syscall) {      // Any syscall error
+        if ((err as any).syscall) {      // Any syscall error
             return true;
         }
 
@@ -276,7 +263,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
     /**
      * Called to push the next segment.
      */
-    async _read() {
+    /*protected*/ async _read(): Promise<void> {
 
         try {
             let ready = true;
@@ -284,10 +271,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
                 try {
                     const last = this.#current;
                     this.#current = await this._getNextSegment();
-                    if (last) {
-                        last._abandon();
-                    }
-
+                    last?._abandon();
                     ready = this.push(this.#current);
                 }
                 catch (err) {
@@ -314,11 +298,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
         }
     }
 
-    /**
-     * @param {?Error} err
-     * @param {*} cb
-     */
-    _destroy(err, cb) {
+    /*protected*/ _destroy(err: Error | null, cb: any): void {
 
         super._destroy(err, cb);
 
@@ -335,10 +315,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
 
     // Private methods
 
-    /**
-     * @return {Promise<exports.HlsReaderObject | null>}
-     */
-    async _getNextSegment() {
+    private async _getNextSegment(): Promise<HlsReaderObject | null> {
 
         let playlist;
         while (playlist = await this._waitForUpdate(playlist)) {
@@ -362,7 +339,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
             const segment = playlist.getResolvedSegment(next.msn, this.baseUrl);
             if (!segment ||
                 (next.part === undefined && segment.isPartial()) ||
-                (next.part && next.part >= (segment.parts || []).length)) {
+                (next.part && next.part >= (segment?.parts?.length || 0))) {
 
                 if (playlist.index.ended) {
                     return null;        // Done - nothing more to do
@@ -388,7 +365,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
 
             this.#next = next.next();
 
-            return new exports.HlsReaderObject(next.msn, segment);
+            return new HlsReaderObject(next.msn, segment);
         }
 
         return null;
@@ -396,12 +373,8 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
 
     /**
      * Resolves once there is an index with a different head, than the passed one.
-     *
-     * @param {Helpers.ParsedPlaylist} [playlist]
-     *
-     * @return {Promise<Helpers.ParsedPlaylist | undefined>}
      */
-    async _waitForUpdate(playlist) {
+    private async _waitForUpdate(playlist?: ParsedPlaylist): Promise<ParsedPlaylist | undefined> {
 
         while (!this.destroyed) {
             if (this.index && !this.#playlist) {
@@ -422,31 +395,27 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
         }
     }
 
-    _stallCheck(updated = false) {
+    private _stallCheck(updated = false): void | never {
 
         if (updated) {
             this.#indexStalledAt = null;
         }
         else {
             if (this.#indexStalledAt === null) {
-                this.#indexStalledAt = Process.hrtime.bigint();      // Record when stall began
+                this.#indexStalledAt = hrtime.bigint();      // Record when stall began
             }
             else {
-                if (Number((Process.hrtime.bigint() - this.#indexStalledAt) / BigInt(1000000)) > this.stallAfterMs) {
+                if (Number((hrtime.bigint() - this.#indexStalledAt) / BigInt(1000000)) > this.stallAfterMs) {
                     throw new Error('Index update stalled');
                 }
             }
         }
     }
 
-    /**
-     * @param {Helpers.ParsedPlaylist} playlist
-     * @return {number}
-     */
-    _getUpdateInterval({ index, partTarget }, updated = false) {
+    protected _getUpdateInterval({ index, partTarget }: ParsedPlaylist, updated = false): number {
 
         let updateInterval = index.target_duration;
-        if (this.lowLatency && partTarget && partTarget > 0) {
+        if (this.lowLatency && partTarget! > 0) {
             updateInterval = partTarget;
         }
 
@@ -461,10 +430,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
         return updateInterval;
     }
 
-    /**
-     * @param {Helpers.ParsedPlaylist} playlist
-     */
-    _initialSegmentPointer(playlist) {
+    private _initialSegmentPointer(playlist: ParsedPlaylist): SegmentPointer {
 
         if (!this.fullStream && this.startDate) {
             const msn = playlist.msnForDate(this.startDate);
@@ -503,12 +469,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
         return new SegmentPointer(playlist.startMsn(this.fullStream), this.lowLatency ? 0 : undefined);
     }
 
-    /**
-     * @param {M3U8Playlist} index
-     *
-     * @return {M3U8Playlist | undefined}
-     */
-    _preprocessIndex(index) {
+    protected _preprocessIndex(index: M3U8Playlist): M3U8Playlist | undefined {
 
 /*        if (!this.lowLatency) {
 
@@ -524,17 +485,14 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
         return index;
     }
 
-    /**
-     * @param {Helpers.ParsedPlaylist | undefined} playlist
-     */
-    _emitHintsNT(playlist) {
+    private _emitHintsNT(playlist?: ParsedPlaylist) {
 
         if (!this.lowLatency || !playlist || !playlist.serverControl.canBlockReload) {
             return;               // Server does not support blocking
         }
 
         const hints = playlist.preloadHints;
-        for (const type of /** @type {(keyof Helpers.ParsedPlaylist['preloadHints'])[]} */(['map', 'part'])) {
+        for (const type of (['map', 'part'] as (keyof ParsedPlaylist['preloadHints'])[])) {
             const hint = hints[type];
             const last = this.#currentHints[type];
 
@@ -545,27 +503,20 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
         }
     }
 
-    _keepIndexUpdated() {
+    private _keepIndexUpdated() {
 
         assert(!this.#nextUpdate);
 
-        /**
-         * @param {Url.URL} url
-         */
-        const createFetch = (url) => {
+        const createFetch = (url: URL) => {
 
-            return (this.#fetch = Helpers.fetch(url.href, { timeout: 30 * 1000 }));
+            return (this.#fetch = performFetch(url, { timeout: 30 * 1000 }));
         };
 
-        /**
-         * @param {Helpers.ParsedPlaylist} fromPlaylist
-         * @param {boolean} wasUpdated
-         */
-        const delayedUpdate = async (fromPlaylist, wasUpdated, wasError = false) => {
+        const delayedUpdate = async (fromPlaylist: ParsedPlaylist, wasUpdated: boolean, wasError = false) => {
 
             let delay = this._getUpdateInterval(fromPlaylist, wasUpdated && !wasError);
 
-            const url = new Url.URL(/** @type {any} */(this.url));
+            const url = new URL(this.url as any);
             if (url.protocol === 'data:') {
                 throw new Error('data: uri cannot be updated');
             }
@@ -589,7 +540,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
 
             if (delay && this.#watcher) {
                 try {
-                    await Promise.race([Hoek.wait(delay), this.#watcher.next()]);
+                    await Promise.race([wait(delay), this.#watcher.next()]);
                 }
                 catch (err) {
                     this.emit('problem', err);
@@ -597,7 +548,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
                 }
             }
             else {
-                await Hoek.wait(delay);
+                await wait(delay);
             }
 
             assert(!this.destroyed, 'destroyed');
@@ -607,31 +558,27 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
 
         /**
          * Runs in a loop until there are no more updates, or stream is destroyed
-         *
-         * @param {ReturnType<Helpers.fetch>} fetch
-         * @param {MediaPlaylist} [fromIndex]
-         *
-         * @return {Promise<void>}
          */
-        const performUpdate = async (fetch, fromIndex) => {
+        const performUpdate = async (fetchPromise: ReturnType<typeof performFetch>, fromIndex?: MediaPlaylist): Promise<void> => {
 
             let updated = !fromIndex;
             let errored = false;
             try {
-                var { meta, stream } = await fetch;
+                // eslint-disable-next-line no-var
+                var { meta, stream } = await fetchPromise;
 
                 assert(!this.destroyed, 'destroyed');
                 this.validateIndexMeta(meta);
                 this.baseUrl = meta.url;
 
-                const rawIndex = await M3U8Parse(stream, { extensions: this.extensions });
+                const rawIndex = await M3U8Parse(stream as Stream, { extensions: this.extensions });
                 assert(!this.destroyed, 'destroyed');
 
                 this.#index = this._preprocessIndex(rawIndex);
 
                 if (this.#index) {
-                    this.#playlist = !this.#index.master ? new Helpers.ParsedPlaylist(M3U8Playlist.castAsMedia(this.#index)) : undefined;
-                    if (this.#playlist && this.#playlist.index.isLive()) {
+                    this.#playlist = !this.#index.master ? new ParsedPlaylist(M3U8Playlist.castAsMedia(this.#index)) : undefined;
+                    if (this.#playlist?.index.isLive()) {
                         updated = !fromIndex || this.#playlist.index.ended || !this.#playlist.isSameHead(fromIndex);
                     }
 
@@ -643,11 +590,11 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
 
                     // Delay to allow nexttick emits to be delivered
 
-                    await Hoek.wait();
+                    await wait();
 
                     // Update current entry
 
-                    if (this.#playlist && this.#current && this.#current.entry.isPartial()) {
+                    if (this.#playlist && this.#current?.entry.isPartial()) {
                         const currentSegment = this.#playlist.getResolvedSegment(this.#current.msn, this.baseUrl);
                         if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
                             this.#current.entry = currentSegment;
@@ -670,7 +617,7 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
                 // Assign #nextUpdate
 
                 if (!this.destroyed && this.#index) {
-                    if (this.#playlist && this.#playlist.index.isLive()) {
+                    if (this.#playlist?.index.isLive()) {
                         this.#nextUpdate = delayedUpdate(this.#playlist, updated, errored);
                     }
                     else {
@@ -682,15 +629,14 @@ exports.HlsSegmentReader = class HlsSegmentReader extends Readable {
                 }
 
                 assert(this.#nextUpdate);
-                this.#nextUpdate.catch(Hoek.ignore);
+                this.#nextUpdate.catch(ignore);
             }
         };
 
-        const url = new Url.URL(/** @type {any} */(this.url));
-        if (url.protocol === 'file:') {
-            this.#watcher = new Helpers.FsWatcher(url);
+        if (this.url.protocol === 'file:') {
+            this.#watcher = new FsWatcher(this.url);
         }
 
-        this.#nextUpdate = performUpdate(createFetch(url));
+        this.#nextUpdate = performUpdate(createFetch(this.url));
     }
-};
+}

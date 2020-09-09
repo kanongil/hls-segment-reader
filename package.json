@@ -4,8 +4,8 @@
   "description": "Read segments from HLS streams using a Readable",
   "main": "lib",
   "scripts": {
-    "test": "lab -a @hapi/code -t 90 -L",
-    "test-cov-html": "lab -a @hapi/code -r html -o coverage.html"
+    "test": "lab -c -L",
+    "test-cov-html": "lab -c -r html -o coverage.html"
   },
   "keywords": [
     "streaming",
@@ -22,7 +22,7 @@
   "dependencies": {
     "@hapi/boom": "^9.1.0",
     "@hapi/hoek": "^9.0.4",
-    "m3u8parse": "^3.0.0-beta.2",
+    "m3u8parse": "^3.0.0-beta.3",
     "readable-stream": "^3.3.0",
     "uristream": "^6.0.1"
   },
@@ -30,16 +30,16 @@
     "@hapi/code": "^8.0.1",
     "@hapi/eslint-config-hapi": "^13.0.2",
     "@hapi/eslint-plugin-hapi": "^4.3.5",
-    "@hapi/hapi": "^19.1.1",
+    "@hapi/hapi": "^20.0.0",
     "@hapi/inert": "^6.0.1",
     "@hapi/lab": "^23.0.0",
     "@types/mime-types": "^2.1.0",
     "@types/readable-stream": "^2.3.9",
-    "@typescript-eslint/eslint-plugin": "^3.9.0",
-    "@typescript-eslint/parser": "^3.9.0",
+    "@typescript-eslint/eslint-plugin": "~4.1.0",
+    "@typescript-eslint/parser": "~4.1.0",
     "eslint": "^7.7.0",
     "joi": "^17.2.0",
-    "typescript": "^3.9.7"
+    "typescript": "~4.0.2"
   },
   "repository": {
     "type": "git",

@@ -4,15 +4,23 @@ module.exports = {
     root: true,
     extends: [
         '@hapi/hapi',
-        'plugin:@typescript-eslint/base',
-        'plugin:@typescript-eslint/eslint-recommended',
-//        'plugin:@typescript-eslint/recommended'
+        'plugin:@typescript-eslint/eslint-recommended'
+    ],
+    plugins: [
+        '@typescript-eslint'
     ],
     parserOptions: {
-        loc: true,
-        comment: true,
-        range: true,
-        ecmaVersion: 2020,
-        sourceType: 'script'
-    }
+        ecmaVersion: 2019
+    },
+    ignorePatterns: ['/dist/**'],
+    overrides: [{
+        files: ['lib/**/*.ts'],
+        parser: '@typescript-eslint/parser',
+        parserOptions: {
+            sourceType: 'module'
+        },
+        rules: {
+            'no-unused-vars': 0
+        }
+    }]
 };
