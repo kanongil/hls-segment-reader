@@ -149,7 +149,7 @@ export type HlsSegmentReaderOptions = {
 };
 
 
-import { TypedReadable, ReadableEvents } from './typed-readable';
+import { TypedReadable, ReadableEvents } from './raw/typed-readable';
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
     index: (index: M3U8Playlist) => void;
