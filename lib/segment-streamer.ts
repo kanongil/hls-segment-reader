@@ -1,30 +1,25 @@
 
-import type { HlsSegmentReader } from './segment-reader';
-import type { M3U8Segment, MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
-import type { ReadableStream, FetchResult } from './helpers';
+import type { HlsSegmentReader, HlsReaderObject } from './segment-reader';
+import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
+import type { FetchResult, Byterange } from './helpers';
 
 import { Stream, finished } from 'stream';
 
 import { assert as hoekAssert } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse/lib/attrlist';
 import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist';
-import { Transform } from 'readable-stream';
 
+import { TypedTransform, DuplexEvents } from './raw/typed-readable';
 import { SegmentDownloader } from './segment-downloader';
 import { HlsSegmentObject } from './segment-object';
 
-try {
-    const MimeTypes = require('mime-types');
+import { types as MimeTypes } from 'mime-types';
 
-    /* eslint-disable dot-notation */
-    MimeTypes.types['ac3'] = 'audio/ac3';
-    MimeTypes.types['eac3'] = 'audio/eac3';
-    MimeTypes.types['m4s'] = 'video/iso.segment';
-    /* eslint-enable dot-notation */
-}
-catch (err) {
-    console.error('Failed to inject extra types', err);
-}
+/* eslint-disable @typescript-eslint/dot-notation */
+MimeTypes['ac3'] = 'audio/ac3';
+MimeTypes['eac3'] = 'audio/eac3';
+MimeTypes['m4s'] = 'video/iso.segment';
+/* eslint-enable @typescript-eslint/dot-notation */
 
 
 // eslint-disable-next-line func-style
@@ -32,6 +27,14 @@ function assert(condition: any, ...args: any[]): asserts condition {
 
     hoekAssert(condition, ...args);
 }
+
+// eslint-disable-next-line func-style
+function assertReaderObject(obj: any, message: string): asserts obj is HlsReaderObject {
+
+    assert(typeof obj.msn === 'number' && obj.entry, message);
+}
+
+// TODO: don't error on abort while fetching meta !!!!!
 
 
 const internals = {
@@ -52,9 +55,14 @@ const internals = {
         'application/mp4'
     ]),
 
-    isSameMap(m1: AttrList, m2: AttrList) {
+    isSameMap(m1?: AttrList, m2?: AttrList) {
 
-        return m1 && m2 && m1.get('uri') === m2.get('uri') && m1.get('byterange') === m2.get('byterange');
+        return m1 === m2 || (m1 && m2 && m1.get('uri') === m2.get('uri') && m1.get('byterange') === m2.get('byterange'));
+    },
+
+    isAbortedError(err: Error) {
+
+        return err.message === 'Aborted';
     }
 };
 
@@ -62,38 +70,37 @@ export type HlsSegmentStreamerOptions = {
     highWaterMark?: number;
     withData?: boolean; // default true
     lowLatency?: boolean; // default true
-}
+};
 
-export class HlsSegmentStreamer extends Transform {
+// FIXME: Need to handle index updates to track lifetime of segments
+
+export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U8IndependentSegment }, HlsSegmentObject, DuplexEvents<HlsSegmentObject>> {
 
     withData: boolean;
     lowLatency: boolean;
 
-    #readState = {
-        /** @type {Set<number>} */
-        indexTokens: new Set(),
-        /** @type {Set<number>} */
-        activeTokens: new Set(),
+    #readState = new (class ReadState {
+        indexTokens = new Set<number>();
+        activeTokens = new Set<number>();
 
-        mapSeq: -1,
-        /** @type {AttrList | undefined} */
-        map: undefined,
-        /** @type {?Promise<HlsSegmentObject>} */
-        fetching: null,
-        active: false,
-        discont: false
-    };
+        //mapSeq: -1,
+        map?: AttrList;
+        fetching: Promise<HlsSegmentObject> | null = null;
+        //active: false;
+        //discont: false;
+    })();
 
-    #active = new Map<number, HlsSegmentObject & { stream?: ReadableStream & { addParts?: Function, addHint?: Function }}>(); // used to stop buffering on expired segments
+    #active = new Map<number, FetchResult>(); // used to stop buffering on expired segments
     #downloader: SegmentDownloader;
     #reader?: HlsSegmentReader;
+    #onIndexUpdate = this._onIndexUpdate.bind(this);
 
     constructor(reader?: HlsSegmentReader, options: HlsSegmentStreamerOptions = {}) {
 
         super({ objectMode: true, highWaterMark: (reader || {} as any).highWaterMark || options.highWaterMark || 0 });
 
         if (typeof reader === 'object' && !(reader instanceof Stream)) {
-            options = /** @type {HlsSegmentStreamerOptions} */(reader);
+            options = reader;
             reader = undefined;
         }
 
@@ -107,14 +114,12 @@ export class HlsSegmentStreamer extends Transform {
             assert(!this.#reader, 'Only one piped source is supported');
 
             this.#reader = src;
-            src.on('index', (index: M3U8Playlist) => {
-
-                this.emit('index', index);
-            });
+            src.on('index', this.#onIndexUpdate);
         });
 
         this.on('unpipe', () => {
 
+            this.#reader!.off('index', this.#onIndexUpdate);
             this.#reader = undefined;
         });
 
@@ -130,7 +135,7 @@ export class HlsSegmentStreamer extends Transform {
         }
     }
 
-    abort(graceful = false) {
+    abort(graceful = false): void {
 
         if (!graceful) {
             this.#downloader.setValid();
@@ -145,29 +150,30 @@ export class HlsSegmentStreamer extends Transform {
         }
     }
 
-    _destroy(err: Error | null, cb: any) {
+    _destroy(err: Error | null, cb: unknown): void {
 
         // FIXME: is reader unpiped first???
         if (this.#reader && !this.#reader.destroyed) {
+            this.#reader.off('index', this.#onIndexUpdate);
             this.#reader.destroy(err || undefined);
         }
 
-        super._destroy(err, cb);
+        super._destroy(err, cb as any);
 
         this.abort(!!err);
     }
 
-    get index() {
+    get index(): M3U8Playlist | undefined {
 
         return this.#reader ? this.#reader.index : undefined;
     }
 
-    get segmentMimeTypes() {
+    get segmentMimeTypes(): Set<string> {
 
         return internals.segmentMimeTypes;
     }
 
-    validateSegmentMeta(meta: FetchResult['meta']) {
+    validateSegmentMeta(meta: FetchResult['meta']): void | never {
 
         // Check for valid mime type
 
@@ -176,122 +182,173 @@ export class HlsSegmentStreamer extends Transform {
         }
     }
 
-    _transform(segment: { msn: number, entry: M3U8IndependentSegment }, _: unknown, done: (err?: Error) => void) {
+    _transform(segment: HlsReaderObject | unknown, _: unknown, done: (err?: Error) => void): void {
 
-        assert(typeof segment.msn === 'number' && segment.entry, 'Only segment-reader segments are supported');
+        assertReaderObject(segment, 'Only segment-reader segments are supported');
 
-        this._process(segment).then(done.bind(null, undefined), done);
+        this._process(segment).then(() => done(), (err) => {
+
+            done(internals.isAbortedError(err) ? undefined : err);
+        });
     }
 
     // Private methods
 
-    async _process(segment: { msn: number, entry: M3U8IndependentSegment }): Promise<HlsSegmentObject | null> {
+    protected _onIndexUpdate(index: M3U8Playlist): void {
 
         // Update active token list
 
-        if (this.#reader && this.#reader.index && !this.#reader.index.master) {
-            this._updateTokens(M3U8Playlist.castAsMedia(this.#reader.index));
+        if (!index.master) {
+            this._updateTokens(M3U8Playlist.castAsMedia(index));
             this.#downloader.setValid(this.#readState.activeTokens);
+        }
+
+        this.emit('index', index);
+    }
+
+    private async _process(segment: HlsReaderObject): Promise<undefined> {
+
+        // Check for new map entry
+
+        if (!internals.isSameMap(segment.entry.map, this.#readState.map)) {
+            this.#readState.map = segment.entry.map;
+
+            // Fetch init segment
+
+            if (segment.entry.map) {
+                const uri = segment.entry.map.get('uri', AttrList.Types.String);
+                assert(uri, 'EXT-X-MAP must have URI attribute');
+                let byterange;
+                if (segment.entry.map.has('byterange')) {
+                    // Byterange in map is _not_ byterange encoded - rather it is a quoted string!
+
+                    const [length, offset = '0'] = segment.entry.map.get('byterange', AttrList.Types.String)!.split('@');
+                    byterange = {
+                        offset: parseInt(offset, 10),
+                        length: parseInt(length, 10)
+                    };
+                }
+
+                // TODO: what should init token be to not be invalidated???
+                // TODO: what about fetch errors? Remove from this.#readState.map??
+                // FIXME: serialize processing while waiting for an init segment??
+
+                const fetch = await this._fetchFrom(this._tokenForMsn(-1 - segment.msn), { uri, byterange });
+
+                this.push(new HlsSegmentObject(fetch.meta, fetch.stream, 'init', segment.entry.map));
+            }
         }
 
         // Fetch the segment
 
-        const object = await this._fetchFrom({ msn: segment.msn }, segment.entry);
+        if (!segment.isClosed && !this.lowLatency) {
+            await segment.closed;
+        }
+
+        let fetch: FetchResult;
+        if (segment.entry.isPartial()) {
+            if (!this.lowLatency) {
+                // TODO: log a warning??
+                return;
+            }
+
+            // Setup update tracker
+
+            segment.onUpdate = function (update, old) {
+
+                const usedParts = old ? old.parts?.length : update.parts?.length;
+
+                assert(update.parts);
+
+                const segmentParts = update.parts.slice(usedParts);
+                if (segmentParts.length === 0 && !this.isClosed) {
+                    return;      // No new parts
+                }
+
+                const parts = segmentParts.map((part) => ({
+                    uri: part.get('uri', AttrList.Types.String)!,
+                    byterange: part.has('byterange') ? Object.assign({ offset: 0 }, part.get('byterange', AttrList.Types.Byterange)) : undefined
+                }));
+
+                // TODO: handle update while starting fetch !!!!
+
+                fetch.stream.addParts(parts, this.isClosed);
+            };
+
+            // Prepare parts
+
+            assert(segment.entry.parts);
+
+            const parts = (segment.entry.parts ?? []).map((part) => ({
+                uri: part.get('uri', AttrList.Types.String)!,
+                byterange: part.has('byterange') ? Object.assign({ offset: 0 }, part.get('byterange', AttrList.Types.Byterange)) : undefined
+            }));
+
+            fetch = await this._fetchFrom(this._tokenForMsn(segment.msn), parts);
+        }
+        else {
+            fetch = await this._fetchFrom(this._tokenForMsn(segment.msn), { uri: segment.entry.uri!, byterange: segment.entry.byterange });
+        }
 
         // At this point object.stream has only been readied / opened
 
-        const drop = function (err?: Error) {
-
-            if (object.stream) {
-                object.stream.destroy(err);
-            }
-
-            if (err) {
-                throw err;
-            }
-
-            return null;
-        };
-
-        // Check meta
-
-        if (this.#reader && object.file.modified) {
-            const segmentTime = segment.entry.program_time || new Date(+object.file.modified - (segment.entry.duration || 0) * 1000);
-
-            if (this.#reader.startDate && segmentTime < this.#reader.startDate) {
-                return drop(new Error('too early'));
-            }
-
-            if (this.#reader.stopDate && segmentTime > this.#reader.stopDate) {
-                return drop();
-            }
-        }
-
-        // Track embedded stream to append more parts later
-
-        if (object.stream) {
-            this.#active.set(segment.msn, object);
-            finished(object.stream, () => this.#active.delete(segment.msn));
-        }
-
-        return object;
-    }
-
-    /**
-     * @param {SegmentPointer} ptr
-     * @param {M3U8IndependentSegment} segment
-     */
-    async _fetchFrom(ptr, segment: M3U8IndependentSegment) {
-
-        let uri = segment.uri;
-        let byterange = segment.byterange;
-
-        if (ptr.isMap) {
-            assert(segment.map);
-
-            // Fetch init segment
-
-            uri = segment.map.get('uri', AttrList.Types.String);
-            assert(uri, 'EXT-X-MAP must have URI attribute');
-            if (segment.map.has('byterange')) {
-                // Byterange in map is _not_ byterange encoded - rather it is a quoted string!
-
-                const [length, offset = '0'] = (segment.map.get('byterange', AttrList.Types.String) || '').split('@');
-                byterange = {
-                    offset: parseInt(offset, 10),
-                    length: parseInt(length, 10)
-                };
-            }
-            else {
-                byterange = undefined;
-            }
-        }
-
-        let fetch;
         try {
-            if (uri === undefined || ptr.part) {
+            // Check meta
 
-                // Create part request
+            if (this.#reader && fetch.meta.modified) {
+                const segmentTime = segment.entry.program_time || new Date(+fetch.meta.modified - (segment.entry.duration || 0) * 1000);
 
-                assert(segment.parts);
-                const parts = segment.parts.slice(ptr.part || 0).map((part) => ({
-                    uri: part.get('uri', AttrList.Types.String),
-                    /** @type {Required<Helpers.Byterange> | undefined} */
-                    byterange: part.has('byterange') ? Object.assign({ offset: 0 }, part.get('byterange', AttrList.Types.Byterange)) : undefined
-                }));
-                fetch = await this.#downloader.fetchParts(this._tokenForMsn(ptr.msn), parts, !segment.isPartial());
-            }
-            else {
-                fetch = await this.#downloader.fetchSegment(this._tokenForMsn(ptr.msn), uri, byterange);
-                segment.parts = undefined;
+                if (this.#reader.startDate && segmentTime < this.#reader.startDate) {
+                    throw new Error('too early');
+                }
+
+                if (this.#reader.stopDate && segmentTime > this.#reader.stopDate) {
+                    // eslint-disable-next-line @typescript-eslint/no-throw-literal
+                    throw 'ended';
+                }
             }
 
-            this.validateSegmentMeta(fetch.meta);
+            // Track embedded stream to append more parts later
 
-            return new HlsSegmentObject(fetch.meta, fetch.stream, ptr, ptr.isMap && segment.map ? segment.map : segment);
+            if (fetch.stream) {
+                this.#active.set(segment.msn, fetch);
+                finished(fetch.stream, () => this.#active.delete(segment.msn));
+            }
+
+            this.push(new HlsSegmentObject(fetch.meta, fetch.stream, 'segment', segment));
         }
         catch (err) {
-            if (fetch && fetch.stream) {
+            if (fetch.stream && !fetch.stream.destroyed) {
+                fetch.stream.destroy(err);
+            }
+
+            if (err === 'ended') {
+                this.push(null);
+                return;
+            }
+
+            throw err;
+        }
+    }
+
+    private async _fetchFrom(token: number, parts: { uri: string; byterange?: Required<Byterange> } | { uri: string; byterange?: Required<Byterange> }[]) {
+
+        let fetch;
+        if (Array.isArray(parts)) {
+            fetch = await this.#downloader.fetchParts(token, parts);
+        }
+        else {
+            const { uri, byterange } = parts;
+            fetch = await this.#downloader.fetchSegment(token, uri, byterange);
+        }
+
+        try {
+            this.validateSegmentMeta(fetch.meta);
+
+            return fetch;
+        }
+        catch (err) {
+            if (fetch.stream && !fetch.stream.destroyed) {
                 fetch.stream.destroy();
             }
 
@@ -299,25 +356,25 @@ export class HlsSegmentStreamer extends Transform {
         }
     }
 
-    _tokenForMsn(msn: number) {
+    private _tokenForMsn(msn: number) {
 
         return msn; // TODO: handle start over
     }
 
-    _updateTokens(index: MediaPlaylist) {
+    private _updateTokens(index: MediaPlaylist) {
 
         const old = this.#readState.indexTokens;
 
         const current = new Set<number>();
-        for (let i = index.startSeqNo(true); i < index.lastSeqNo(true); ++i) {
+        for (let i = index.startSeqNo(true); i <= index.lastSeqNo(true); ++i) {
             const token = this._tokenForMsn(i);
             current.add(token);
             old.delete(token);
         }
 
-        this.indexTokens = current;
+        this.#readState.indexTokens = current;
         if (this.#readState.discont) {
-            this.#readState.activeTokens = this.indexTokens;
+            this.#readState.activeTokens = this.#readState.indexTokens;
         }
         else {
             // Keep expired tokens until next update
@@ -325,130 +382,4 @@ export class HlsSegmentStreamer extends Transform {
             this.#readState.activeTokens = new Set([...old, ...current]);
         }
     }
-
-
-
-
-    /**
-     * @return {void}
-     */
-    _checkNext() {
-
-        const state = this.#readState;
-        //        console.trace('_checkNext', !!this.readable, !!state.active, !state.fetching, !state.next.isEmpty(), !!index)
-        if (!this.readable || !state.active || state.fetching || state.next.isEmpty() || !this.index) {
-            return;
-        }
-
-        let { next } = state;
-        const index = M3U8Playlist.castAsMedia(this.index);
-        const segment = index.getSegment(next.msn, true);
-
-        // Handle low latency hints
-
-        if (this.lowLatency && index.meta.preload_hints && index.server_control) {
-            const canBlock = index.server_control.get('can-block-reload') === 'YES';
-            if (canBlock && next.isHead(index)) {
-                const active = this.#active.get(next.msn);
-                if (active && active.stream && active.stream.addHint) {
-                    for (const hintAttrs of index.meta.preload_hints) {
-                        const hint = {
-                            uri: hintAttrs.get('uri', AttrList.Types.String),
-                            type: hintAttrs.get('type'),
-                            byterange: hintAttrs.has('byterange-start') ? {
-                                offset: hintAttrs.get('byterange-start', AttrList.Types.Int),
-                                length: (hintAttrs.has('byterange-length') ? hintAttrs.get('byterange-length', AttrList.Types.Int) : undefined)
-                            } : undefined
-                        };
-
-                        active.stream.addHint(hint);
-                    }
-                }
-
-                // TODO: hint when no active stream
-            }
-        }
-
-        if (segment && (this.lowLatency || segment.uri)) {
-            // mark manual discontinuities
-            if (state.discont) {
-                segment.discontinuity = true;
-                state.discont = false;
-                state.map = undefined;
-            }
-
-            // Check if we need to stop
-
-            if (this.stopDate && (segment.program_time || 0) > this.stopDate) {
-                this.push(null);
-                return;
-            }
-
-            // TODO: close part stream on jumps
-
-            if (next.part !== undefined) {
-
-                // Check if there is an active segment to append to
-
-                const active = this.#active.get(next.msn);
-                if (active) {
-                    assert(segment.parts);
-                    const segmentParts = segment.parts.slice(next.part);
-                    const final = !!segment.uri || index.ended;
-
-                    if (segmentParts.length === 0 && !final) {
-                        return;
-                    }
-
-                    const parts = segmentParts.map((part) => ({
-                        uri: part.get('uri', AttrList.Types.String),
-                        byterange: part.get('byterange', AttrList.Types.Byterange)
-                    }));
-
-                    active.stream.addParts(parts, final);
-                    active.segment.details.parts.push(...segmentParts); // TODO: signal that more parts were added
-
-                    state.next = next.next(segment, index.ended);
-                    state.active = !final;
-
-                    return this._checkNext();
-                }
-            }
-
-            if (segment.map) {
-                if (internals.isSameMap(segment.map, state.map)) {
-                    delete segment.map;
-                }
-                else {
-                    next = next.toMap();
-                }
-            }
-
-            // TODO: fetch hint, if at edge
-
-            state.fetching = this._fetchFrom(next, segment);
-            state.fetching.finally(() => {
-
-                state.fetching = null;
-            }).then((object) => {
-
-                if (next.isMap) {
-                    state.map = segment.map;
-                }
-
-                state.active = this.push(object) || next.msn === state.next.msn;
-
-                this._checkNext();
-            }).catch(this.emit.bind(this, 'error'));
-        }
-        else if (index.ended) {
-            this.push(null);
-        }
-        else if (!index.type && (index.lastSeqNo() < state.next.msn - 1)) {
-            // handle live stream restart
-            state.discont = true;
-            state.next = new SegmentPointer(index.startSeqNo(true), this.lowLatency ? 0 : undefined);
-            this._checkNext();
-        }
-    }
-};
+}

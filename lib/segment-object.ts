@@ -1,8 +1,7 @@
-import type { M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
+import type { HlsReaderObject } from './segment-reader';
 import type { FetchResult, ReadableStream } from './helpers';
 
 import { AttrList } from 'm3u8parse/lib/attrlist';
-import { M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
 
 
 export class HlsSegmentObject {
@@ -10,18 +9,25 @@ export class HlsSegmentObject {
     type: 'segment' | 'init';
     file: FetchResult['meta'];
     stream?: ReadableStream;
-    segment?: { msn: number; details: M3U8IndependentSegment };
+    segment?: HlsReaderObject;
     init?: AttrList;
 
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, ptr: { msn: number, isMap?: boolean }, details: M3U8IndependentSegment | AttrList) {
+    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'init', details: AttrList);
+    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment', details: HlsReaderObject);
 
-        const isSegment = !ptr.isMap;
+    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment' | 'init', details: HlsReaderObject | AttrList) {
 
-        this.type = isSegment ? 'segment' : 'init';
+        const isSegment = type === 'segment';
+
+        this.type = type;
         this.file = fileMeta;
         this.stream = stream;
 
-        this.segment = isSegment && details instanceof M3U8Segment ? { msn: ptr.msn, details } : undefined;
-        this.init = isSegment || !(details instanceof AttrList) ? undefined : details;
+        if (isSegment) {
+            this.segment = details as HlsReaderObject;
+        }
+        else {
+            this.init = details as AttrList;
+        }
     }
-};
+}

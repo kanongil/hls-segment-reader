@@ -1,6 +1,6 @@
 import type { Stream } from 'stream';
 import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
-import type { FetchResult } from './helpers';
+import { FetchResult, Deferred } from './helpers';
 
 import { hrtime } from 'process';
 import { URL } from 'url';
@@ -9,8 +9,7 @@ import { Boom } from '@hapi/boom';
 import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse/lib/attrlist';
 import M3U8Parse, { ParserError } from 'm3u8parse/lib/m3u8parse';
-import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist'; // TODO: import from m3u8parse
-import { Readable } from 'readable-stream';
+import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist';
 
 import { ParsedPlaylist, FsWatcher, performFetch } from './helpers';
 
@@ -23,11 +22,11 @@ function assert(condition: any, ...args: any[]): asserts condition {
 
 
 type Hint = {
-    uri: string,
+    uri: string;
     byterange?: {
-        offset: number,
-        length?: number
-    }
+        offset: number;
+        length?: number;
+    };
 };
 
 
@@ -81,55 +80,69 @@ class SegmentPointer {
     }
 }
 
-
 export class HlsReaderObject {
 
     readonly msn: number;
+    readonly isClosed = false;
 
     onUpdate?: ((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void);
 
-    #entry: M3U8IndependentSegment;
-    #closed = false;
+    private _entry: M3U8IndependentSegment;
+    #closed?: Deferred<true>;
 
     constructor(msn: number, segment: M3U8IndependentSegment) {
 
         this.msn = msn;
-        this.#entry = segment;
+        this._entry = segment;
     }
 
     get entry(): M3U8IndependentSegment {
 
-        return this.#entry;
+        return this._entry;
     }
 
     set entry(entry: M3U8IndependentSegment) {
 
-        assert(!this.closed);
+        assert(!this.isClosed);
 
-        const old = this.#entry;
-        this.#entry = entry;
+        const old = this._entry;
+        this._entry = entry;
 
         entry.discontinuity = !!(+entry.discontinuity | +old.discontinuity);
 
-        this.#closed = !entry.isPartial();
+        (<{ isClosed: boolean }> this).isClosed = !entry.isPartial();
+        if (this.isClosed && this.#closed) {
+            this.#closed.resolve(true);
+        }
 
         if (this.onUpdate) {
             process.nextTick(this.onUpdate.bind(this, entry, old));
         }
     }
 
-    get closed(): boolean {
+    closed(): PromiseLike<true> | true {
 
-        return this.#closed;
+        if (this.isClosed) {
+            return true;
+        }
+
+        if (!this.#closed) {
+            this.#closed = new Deferred<true>();
+        }
+
+        return this.#closed.promise;
     }
 
     _abandon(): void {
 
-        if (!this.#closed && this.onUpdate) {
-            process.nextTick(this.onUpdate.bind(this, this.#entry));
+        if (!this.isClosed && this.onUpdate) {
+            process.nextTick(this.onUpdate.bind(this, this._entry));
         }
 
-        this.#closed = true;
+        (<{ isClosed: boolean }> this).isClosed = true;
+        if (this.#closed) {
+            this.#closed.resolve(true);
+        }
     }
 }
 
@@ -145,7 +158,7 @@ export type HlsSegmentReaderOptions = {
 
     maxStallTime?: number;
 
-    extensions?: { [K: string]: boolean }
+    extensions?: { [K: string]: boolean };
 };
 
 
@@ -153,6 +166,7 @@ import { TypedReadable, ReadableEvents } from './raw/typed-readable';
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
     index: (index: M3U8Playlist) => void;
+    problem: (err: Error) => void;
 }
 
 
@@ -239,7 +253,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
      * The test is quite lenient since this will only be called for resources that have previously
      * been accessed without an error.
      */
-    isRecoverableUpdateError(err: Error) {
+    isRecoverableUpdateError(err: Error): boolean {
 
         const { recoverableCodes } = HlsSegmentReader;
 
@@ -298,9 +312,9 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         }
     }
 
-    /*protected*/ _destroy(err: Error | null, cb: any): void {
+    /*protected*/ _destroy(err: Error | null, cb: unknown): void {
 
-        super._destroy(err, cb);
+        super._destroy(err, cb as any);
 
         if (this.#fetch) {
             this.#fetch.abort();
@@ -471,7 +485,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
     protected _preprocessIndex(index: M3U8Playlist): M3U8Playlist | undefined {
 
-/*        if (!this.lowLatency) {
+        /*if (!this.lowLatency) {
 
             // Ignore partial-only segment
 
@@ -594,7 +608,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
                     // Update current entry
 
-                    if (this.#playlist && this.#current?.entry.isPartial()) {
+                    if (this.#playlist && this.#current && !this.#current.isClosed) {
                         const currentSegment = this.#playlist.getResolvedSegment(this.#current.msn, this.baseUrl);
                         if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
                             this.#current.entry = currentSegment;

@@ -13,15 +13,15 @@ const tsify = function (content, fileName) {
     compilerOptions.sourceMap = false;
     compilerOptions.inlineSourceMap = true;
 
-    const { outputText, diagnostics } = Ts.transpileModule(content, {
+    const { outputText/*, diagnostics*/ } = Ts.transpileModule(content, {
         fileName,
         compilerOptions,
-        reportDiagnostics: true
+        reportDiagnostics: false
     });
 
     const splicePoint = outputText.indexOf('Object.defineProperty(exports, "__esModule", { value: true })');
     if (splicePoint !== -1) {
-        return '/* $lab:coverage:off$ */' + outputText.slice(0, splicePoint) + '/* $lab:coverage:on$ */' + outputText.slice(splicePoint);
+        return '/* $lab:coverage:off$ */\n' + outputText.slice(0, splicePoint) + '/* $lab:coverage:on$ */\n' + outputText.slice(splicePoint);
     }
 
     return outputText;
@@ -57,8 +57,5 @@ const getCompilerOptions = function (configFileName) {
 
 module.exports = [{
     ext: '.ts',
-    transform: tsify
-}, {
-    ext: '.tsx',
     transform: tsify
 }];

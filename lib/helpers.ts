@@ -1,13 +1,15 @@
-import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
-export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void, destroyed: boolean };
+import type { MediaPlaylist, M3U8IndependentSegment, M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
+export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void; destroyed: boolean };
 
 import { watch } from 'fs';
 import { URL, fileURLToPath } from 'url';
 
-const UriStream = require('uristream') as (uri: string, options: {}) => ReadableStream;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const UriStream = require('uristream') as (uri: string, options: Record<string, unknown>) => ReadableStream;
 
 import { AttrList } from 'm3u8parse';
 
+// eslint-disable-next-line @typescript-eslint/no-namespace
 namespace Uristream {
     export type Meta = {
         url: string;
@@ -15,18 +17,18 @@ namespace Uristream {
         size: number;
         modified: number | null;
         etag?: string;
-    }
+    };
 }
 
 export type Byterange = {
     offset: number;
     length?: number;
-}
+};
 
 export type FetchResult = {
     meta: Uristream.Meta;
     stream?: ReadableStream;
-}
+};
 
 
 const internals = {
@@ -51,12 +53,22 @@ export class Deferred<T> {
 }
 
 
-type AbortablePromise<T> = Promise<T> & { abort: () => void }
+type AbortablePromise<T> = Promise<T> & { abort: () => void };
 
 type FetchOptions = {
     byterange?: Byterange;
     probe?: boolean;
     timeout?: number;
+};
+
+type PartData = {
+    uri: string;
+    byterange?: Byterange;
+};
+
+type PreloadHints = {
+    part?: PartData;
+    map?: PartData;
 };
 
 export const performFetch = function (uri: URL | string, { byterange, probe = false, timeout }: FetchOptions = {}): AbortablePromise<FetchResult> {
@@ -171,7 +183,7 @@ export class ParsedPlaylist {
                 (index.segments[index.segments.length - 1].parts || []).length);
     }
 
-    nextHead(includePartial = false): { msn: number, part?: number } {
+    nextHead(includePartial = false): { msn: number; part?: number } {
 
         if (includePartial && this.partTarget) {
             const lastSegment = this.segments.length ? this.segments[this.segments.length - 1] : { uri: undefined, parts: undefined };
@@ -187,18 +199,18 @@ export class ParsedPlaylist {
         return { msn: this.lastMsn(false) + 1 };
     }
 
-    get segments() {
+    get segments(): M3U8Segment[] {
 
         return this.index.segments;
     }
 
-    get partTarget() {
+    get partTarget(): number | undefined {
 
         const info = this.index.part_info;
         return info ? info.get('part-target', AttrList.Types.Float) || undefined : undefined;
     }
 
-    get serverControl() {
+    get serverControl(): { canBlockReload: boolean; partHoldBack?: number } {
 
         const control = this.index.server_control;
         return {
@@ -207,10 +219,9 @@ export class ParsedPlaylist {
         };
     }
 
-    get preloadHints() {
+    get preloadHints(): PreloadHints {
 
-        type PartData = { uri: string, byterange?: Byterange };
-        const hints: { part?: PartData, map?: PartData } = {};
+        const hints: PreloadHints = {};
 
         const list = this.index.meta.preload_hints;
         for (const attrs of list || []) {
@@ -276,7 +287,7 @@ export class FsWatcher {
 
     // Returns latest event since last call, or waits for next
 
-    next() {
+    next(): PromiseLike<FSWatcherEvents> | FSWatcherEvents {
 
         if (this.#error) {
             throw this.#error;

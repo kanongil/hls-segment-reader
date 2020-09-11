@@ -4,7 +4,7 @@
   "description": "Read segments from HLS streams using a Readable",
   "main": "lib",
   "scripts": {
-    "test": "lab -c -L",
+    "test": "lab -t 90 -L",
     "test-cov-html": "lab -c -r html -o coverage.html"
   },
   "keywords": [

@@ -16,15 +16,15 @@ const internals = {
 };
 
 
-type ExtendedFetch = Promise<Required<FetchResult> & { part: Part }> & { abort: () => void };
+type ExtendedFetch = Promise<FetchResult & { part: Part }> & { abort: () => void };
 
 export type Hint = {
-    part: { uri: string, type: 'PART' | 'MAP', byterange?: Byterange };
-    fetch: ExtendedFetch
+    part: { uri: string; type: 'PART' | 'MAP'; byterange?: Byterange };
+    fetch: ExtendedFetch;
 };
 
 export type Part = {
-    uri: string;
+    uri?: string;
     byterange?: Byterange;
     final?: boolean;
     hint?: Hint;
@@ -66,33 +66,27 @@ class PartStream extends PassThrough {
 
             const fetches = this._mergeParts(this.#queuedParts, { final, hint }).map((part) => {
 
-                const resolveMeta = !this.#meta.queued;
-                this.#meta.queued = false;
+                const fetch = this._fetchPart(part);
 
-                const fetch = part.hint ? part.hint.fetch : performFetch(part.uri, { byterange: part.byterange }) as ExtendedFetch;
+                if (!this.#meta.queued) {
+                    this.#meta.queued = false;
+                    fetch.then(({ meta }) => this.#meta.resolve(meta), this.#meta.reject);
+                }
 
-                const promise = Object.assign(fetch.then((fetchResult) => {
-
-                    const result = { ...fetchResult, part };
-
-                    if (resolveMeta) {
-                        this.#meta.resolve(fetchResult.meta);
-                    }
-
-                    return result;
-                }), {
-                    abort: () => fetch.abort()
-                });
-
-                return promise;
+                return fetch;
             });
 
-            this._feedFetches(fetches).catch(this.destroy.bind(this));
+            this._feedFetches(fetches).catch((err) => {
+
+                if (!this.destroyed) {
+                    this.destroy(err);
+                }
+            });
 
             this.#queuedParts = [];
         };
 
-        final ? start(this.#hint) : this.#fetchTimer = setImmediate(start, this.#hint);
+        this.#fetchTimer = setImmediate(start, this.#hint);
         this.#hint = undefined;
     }
 
@@ -181,7 +175,7 @@ class PartStream extends PassThrough {
         return this.#meta.promise;
     }
 
-    _mergeParts(parts: Part[], { final, hint }: { final: boolean, hint?: Hint }): Part[] {
+    _mergeParts(parts: Part[], { final, hint }: { final: boolean; hint?: Hint }): Part[] {
 
         if (hint) {
             for (const part of parts) {
@@ -214,15 +208,53 @@ class PartStream extends PassThrough {
         }
 
         if (final) {
+            if (!merged.length) {
+                merged.push({});
+            }
+
             merged[merged.length - 1].final = true;
         }
 
         return merged;
     }
 
-    _feedPart(stream: ReadableStream, part: Part) {
+    _fetchPart(part: Part): ExtendedFetch {
+
+        if (part.hint) {
+            return part.hint.fetch;
+        }
+
+        if (!part.uri) {
+            return Object.assign(Promise.resolve({
+                stream: undefined,
+                meta: {
+                    url: '',
+                    mime: '',
+                    size: -1,
+                    modified: null
+                },
+                part
+            }), { abort: () => undefined });
+        }
+
+        const fetch = performFetch(part.uri, { byterange: part.byterange });
+
+        return Object.assign(fetch.then((fetchResult) => ({ ...fetchResult, part })), {
+            abort: () => fetch.abort()
+        });
+    }
+
+    _feedPart(stream: ReadableStream | undefined, part: Part) {
 
         // TODO: only feed part.byterange.length in case it is longer??
+
+        if (!stream) {
+            if (part.final) {
+                this.push(null);
+            }
+
+            return;
+        }
 
         stream.pipe(this, { end: !!part.final });
         return internals.streamFinished(stream);
@@ -230,6 +262,7 @@ class PartStream extends PassThrough {
 }
 
 
+// eslint-disable-next-line @typescript-eslint/ban-types
 type FetchToken = object | string | number;
 
 export class SegmentDownloader {
@@ -283,7 +316,7 @@ export class SegmentDownloader {
      *
      * @param {Set<FetchToken>} tokens
      */
-    setValid(tokens = new Set()) {
+    setValid(tokens = new Set()): void {
 
         for (const [token, fetch] of this.#fetches) {
 
@@ -294,7 +327,7 @@ export class SegmentDownloader {
         }
     }
 
-    _startTracking(token: FetchToken, promise: ReturnType<typeof performFetch>) {
+    private _startTracking(token: FetchToken, promise: ReturnType<typeof performFetch>) {
 
         assert(!this.#fetches.has(token), 'A token can only be tracked once');
 
@@ -319,7 +352,7 @@ export class SegmentDownloader {
         this.#fetches.set(token, promise);
     }
 
-    _stopTracking(token: FetchToken) {
+    private _stopTracking(token: FetchToken) {
 
         this.#fetches.delete(token);
     }

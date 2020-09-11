@@ -9,11 +9,12 @@ const Code = require('@hapi/code');
 const Hapi = require('@hapi/hapi');
 const Hoek = require('@hapi/hoek');
 const Inert = require('@hapi/inert');
-const Joi = require('joi');
 const Lab = require('@hapi/lab');
-const M3U8Parse = require('m3u8parse');
 const Uristream = require('uristream');
 
+const Shared = require('./_shared');
+
+// eslint-disable-next-line @hapi/hapi/capitalize-modules
 const createSimpleReader = require('..');
 const { HlsSegmentReader, HlsSegmentStreamer } = require('..');
 
@@ -30,68 +31,21 @@ const internals = {
 };
 
 
-internals.provisionServer = () => {
-
-    const server = new Hapi.Server({
-        routes: { files: { relativeTo: Path.join(__dirname, 'fixtures') } },
-        debug: false
-    });
-
-    server.register(Inert);
-
-    server.route({ method: 'GET', path: '/simple/{path*}', handler: { directory: { path: '.' } } });
-    server.route({
-        method: 'GET', path: '/error', handler(request, h) {
-
-            throw new Error('!!!');
-        }
-    });
-
-    return server;
-};
-
-
-internals.readSegments = (Class, ...args) => {
-
-    let r;
-    const promise = new Promise((resolve, reject) => {
-
-        r = new Class(...args);
-        r.on('error', reject);
-
-        const segments = [];
-        r.on('data', (segment) => {
-
-            segments.push(segment);
-        });
-
-        r.on('end', () => {
-
-            resolve(segments);
-        });
-    });
-
-    promise.reader = r;
-
-    return promise;
-};
-
-
 // Test shortcuts
 
 const lab = exports.lab = Lab.script();
-const { after, before, beforeEach, describe, it } = lab;
+const { after, afterEach, before, beforeEach, describe, it } = lab;
 const { expect } = Code;
 
 
 describe('HlsSegmentStreamer()', () => {
 
-    const readSegments = internals.readSegments.bind(null, HlsSegmentStreamer);
+    const readSegments = Shared.readSegments.bind(null, HlsSegmentStreamer);
     let server;
 
     before(async () => {
 
-        server = await internals.provisionServer();
+        server = await Shared.provisionServer();
         return server.start();
     });
 
@@ -261,6 +215,18 @@ describe('HlsSegmentStreamer()', () => {
             expect(checksums).to.equal(internals.checksums);
         });
 
+        it('does not internally buffer (highWaterMark=0)', async () => {
+
+            const reader = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'));
+            const streamer = new HlsSegmentStreamer(reader, { withData: false, highWaterMark: 0 });
+
+            for await (const obj of streamer) {
+                expect(obj).to.exist();
+                await Hoek.wait(20);
+                expect(streamer.readableLength).to.equal(0);
+            }
+        });
+
         it('supports the highWaterMark option', async () => {
 
             const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 2 });
@@ -332,15 +298,15 @@ describe('HlsSegmentStreamer()', () => {
         // handles all kinds of segment reference url
         // handles .m3u files
     });
-return;
+
     describe('live index', { parallel: false }, () => {
 
-        let serverState = {};
+        const serverState = { state: {} };
         let liveServer;
 
         const prepareLiveReader = function (readerOptions = {}, state = {}) {
 
-            const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
+            const reader = createSimpleReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: false, withData: true, ...readerOptions });
             reader._intervals = [];
             reader._getUpdateInterval = function (updated) {
 
@@ -348,131 +314,32 @@ return;
                 return undefined;
             };
 
-            serverState = { firstSeqNo: 0, segmentCount: 10, targetDuration: 2, ...state };
+            serverState.state = { firstSeqNo: 0, segmentCount: 10, targetDuration: 2, ...state };
 
-            return { reader, state: serverState };
+            return { reader, state: serverState.state };
         };
 
-        const genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCount, partIndex, ended }) {
+        beforeEach(() => {
 
-            const partDuration = targetDuration / partCount;
-
-            const segments = [];
-            for (let i = 0; i < segmentCount; ++i) {
-                const parts = [];
-                if (i >= segmentCount - 2) {
-                    for (let j = 0; j < partCount; ++j) {
-                        parts.push(new M3U8Parse.AttrList({
-                            duration: partDuration,
-                            uri: `"${firstSeqNo + i}-part${j}.ts"`
-                        }));
-                    }
-                }
-
-                segments.push({
-                    duration: targetDuration || 2,
-                    uri: `${firstSeqNo + i}.ts`,
-                    title: '',
-                    parts: parts.length ? parts : undefined
-                });
-            }
-
-            if (partIndex) {
-                const parts = [];
-                for (let i = 0; i < partIndex; ++i) {
-                    parts.push(new M3U8Parse.AttrList({
-                        duration: partDuration,
-                        uri: `"${firstSeqNo + segmentCount}-part${i}.ts"`
-                    }));
-                }
-
-                segments.push({
-                    parts: parts.length ? parts : undefined
-                });
-            }
-
-            const index = new M3U8Parse.M3U8Playlist({
-                first_seq_no: firstSeqNo,
-                target_duration: targetDuration,
-                part_info: partCount ? new M3U8Parse.AttrList({ 'part-target': partDuration }) : undefined,
-                segments,
-                ended
-            });
-
-            return index;
-        };
-
-        before(() => {
-
-            liveServer = new Hapi.Server({
-                routes: { files: { relativeTo: Path.join(__dirname, 'fixtures') } },
-                debug: false
-            });
-
-            const serveLiveIndex = (request, h) => {
-
-                let index;
-                if (serverState.index) {
-                    index = serverState.index(request.query);
-                }
-                else {
-                    index = genIndex(serverState);
-                }
-
-                return h.response(index.toString()).type('application/vnd.apple.mpegURL');
-            };
-
-            const serveSegment = (request, h) => {
-
-                if (serverState.slow) {
-                    const slowStream = new Readable();
-                    slowStream._read = () => {};
-
-                    slowStream.push(Buffer.alloc(5000));
-
-                    return h.response(slowStream).type('video/mp2t').bytes(30000);
-                }
-
-                console.log('serve', request.params.msn, request.params.part, request.headers.range)
-
-                const size = ~~(5000 / (request.params.part === undefined ? 1 : serverState.partCount)) + parseInt(request.params.msn) + 100 * parseInt(request.params.part || 0);
-                return h.response(Buffer.alloc(size)).type('video/mp2t').bytes(size);
-            };
-
-            liveServer.route({
-                method: 'GET',
-                path: '/live/live.m3u8',
-                handler: serveLiveIndex,
-                options: {
-                    validate: {
-                        query: Joi.object({
-                            '_HLS_msn': Joi.number().integer().min(0).optional(),
-                            '_HLS_part': Joi.number().min(0).optional()
-                        }).with('_HLS_part', '_HLS_msn')
-                    }
-                }
-            });
-            liveServer.route({ method: 'GET', path: '/live/{msn}.ts', handler: serveSegment });
-            liveServer.route({ method: 'GET', path: '/live/{msn}-part{part}.ts', handler: serveSegment });
-
+            liveServer = Shared.provisionLiveServer(serverState);
             return liveServer.start();
         });
 
-        after(() => {
+        afterEach(() => {
 
             return liveServer.stop();
         });
 
         it('handles a basic stream', async () => {
 
-            const { reader, state } = prepareLiveReader();
+            const { reader, state } = prepareLiveReader({ fullStream: true });
             const segments = [];
 
             for await (const obj of reader) {
-                expect(obj.msn).to.equal(segments.length);
+                expect(obj.segment.msn).to.equal(segments.length);
                 segments.push(obj);
 
-                if (obj.msn > 5) {
+                if (obj.segment.msn > 5) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 5) {
                         state.ended = true;
@@ -486,12 +353,10 @@ return;
 
         it('handles sequence number resets', async () => {
 
-            const { reader, state } = prepareLiveReader({}, { firstSeqNo: 10 });
-            const segments = [];
             let reset = false;
+            const { reader, state } = prepareLiveReader({ fullStream: false }, { firstSeqNo: 10, async index() {
 
-            for await (const obj of reader) {
-                segments.push(obj);
+                const index = Shared.genIndex(state);
 
                 if (!reset) {
                     state.firstSeqNo++;
@@ -500,24 +365,31 @@ return;
                         state.firstSeqNo = 0;
                         state.segmentCount = 1;
                         reset = true;
-
-                        await Hoek.wait(50);
                     }
+
+                    await Hoek.wait(20);    // give the reader a chance to catch up
                 }
                 else {
                     state.segmentCount++;
                     if (state.segmentCount === 5) {
                         state.ended = true;
-                        await Hoek.wait(50);
                     }
                 }
+
+                return index;
+            } });
+
+            const segments = [];
+            for await (const obj of reader) {
+                segments.push(obj);
             }
 
-            expect(segments.length).to.equal(11);
-            expect(segments[6].msn).to.equal(0);
-            expect(segments[5].entry.discontinuity).to.be.false();
-            expect(segments[6].entry.discontinuity).to.be.true();
-            expect(segments[7].entry.discontinuity).to.be.false();
+            expect(segments.length).to.equal(14);
+            expect(segments[0].segment.msn).to.equal(16);
+            expect(segments[9].segment.msn).to.equal(0);
+            expect(segments[8].segment.entry.discontinuity).to.be.false();
+            expect(segments[9].segment.entry.discontinuity).to.be.true();
+            expect(segments[10].segment.entry.discontinuity).to.be.false();
         });
 
         it('handles sequence number jumps', async () => {
@@ -529,7 +401,7 @@ return;
             for await (const obj of reader) {
                 segments.push(obj);
 
-                if (!skipped && obj.msn >= state.segmentCount - 1) {
+                if (!skipped && obj.segment.msn >= state.segmentCount - 1) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 5) {
                         state.firstSeqNo = 50;
@@ -537,7 +409,7 @@ return;
                     }
                 }
 
-                if (skipped && obj.msn > 55) {
+                if (skipped && obj.segment.msn > 55) {
                     state.firstSeqNo++;
                     if (state.firstSeqNo === 55) {
                         state.ended = true;
@@ -546,14 +418,16 @@ return;
                 }
             }
 
-            expect(segments.length).to.equal(29);
-            expect(segments[14].msn).to.equal(50);
-            expect(segments[13].entry.discontinuity).to.be.false();
-            expect(segments[14].entry.discontinuity).to.be.true();
-            expect(segments[15].entry.discontinuity).to.be.false();
+            expect(segments.length).to.equal(23);
+            expect(segments[7].segment.msn).to.equal(13);
+            expect(segments[7].segment.entry.discontinuity).to.be.false();
+            expect(segments[8].segment.msn).to.equal(50);
+            expect(segments[8].segment.entry.discontinuity).to.be.true();
+            expect(segments[9].segment.entry.discontinuity).to.be.false();
         });
 
-        it('handles a temporary server outage', async () => {
+        // TODO: test problem emit & data outage
+/*        it('handles a temporary server outage', async () => {
 
             const { reader, state } = prepareLiveReader({}, {
                 index() {
@@ -572,7 +446,7 @@ return;
                         state.ended = true;
                     }
 
-                    const index = genIndex(state);
+                    const index = Shared.genIndex(state);
 
                     ++state.firstSeqNo;
 
@@ -592,75 +466,32 @@ return;
             expect(segments.length).to.equal(30);
             expect(errors.length).to.be.greaterThan(0);
             expect(errors[0]).to.be.an.error('Internal Server Error');
-        });
+        });*/
 
-        it('drops segments when reader is slow', async () => {
+        it('aborts downloads that have been evicted from index', async () => {
 
-            const { reader, state } = prepareLiveReader({ fullStream: false }, {
-                index() {
+            // Note: the eviction logic works on index updates, with a delay to allow an initial segment load some time to complete - otherwise it could be scheduled, have an immediate update, and be aborted before being given a chance
 
-                    if (state.firstSeqNo === 50) {
-                        state.ended = true;
-                    }
-
-                    return genIndex(state);
-                }
-            });
-
-            const segments = [];
-            for await (const obj of reader) {
-                segments.push(obj);
-
-                state.firstSeqNo += 5;
-                await Hoek.wait(10);
-            }
-
-            expect(segments.length).to.equal(20);
-            expect(segments.map((s) => s.msn)).to.equal([
-                6, 7, 10, 15, 20, 25, 30,
-                35, 40, 45, 50, 51, 52, 53,
-                54, 55, 56, 57, 58, 59
-            ]);
-            expect(segments.map((s) => s.entry.discontinuity)).to.equal([
-                false, false, true, true, true, true, true,
-                true, true, true, true, false, false, false,
-                false, false, false, false, false, false
-            ]);
-        });
-
-        /*it('aborts downloads that have been evicted from index', async () => {
-
-            const { reader, state } = prepareLiveReader({ withData: true }, { slow: true, targetDuration: 0 });
+            const { reader, state } = prepareLiveReader({ fullStream: true }, { slow: true, targetDuration: 0 });
             const segments = [];
 
             for await (const obj of reader) {
                 segments.push(obj);
 
                 state.firstSeqNo++;
-                state.ended = true;
+                if (state.firstSeqNo === 3) {
+                    state.ended = true;
+                }
 
                 await Hoek.wait(50);
             }
 
-            expect(segments.length).to.equal(11);
+            expect(segments.length).to.equal(13);
             expect(segments[0].stream.destroyed).to.be.true();
 
             reader.abort();
-        });*/
-
-        it('respects the maxStallTime option', async () => {
-
-            const { reader } = prepareLiveReader({ maxStallTime: 5 }, { segmentCount: 1 });
-
-            await expect((async () => {
-
-                for await (const obj of reader) {
-
-                    expect(obj).to.exist();
-                }
-            })()).to.reject(Error, /Index update stalled/);
         });
-return;
+
         describe('with lowLatency=true', () => {
 
             const prepareLlReader = function (readerOptions = {}, state = {}, indexGen) {
@@ -678,49 +509,12 @@ return;
                 });
             };
 
-            const genLlIndex = function (query, state) {
-
-                // Return playlist with exactly the next part
-
-                if (!state.ended && query._HLS_msn && query._HLS_part !== undefined) {
-                    let msn = query._HLS_msn;
-                    let part = query._HLS_part + 1;
-                    if (part >= state.partCount) {
-                        msn++;
-                        part = 0;
-                    }
-
-                    state.firstSeqNo = msn - state.segmentCount;
-                    state.partIndex = part;
-                }
-
-                const index = genIndex(state);
-
-                index.server_control = new M3U8Parse.AttrList({
-                    'can-block-reload': 'YES',
-                    'part-hold-back': 3 * state.targetDuration / state.partCount
-                });
-
-                if (!state.ended) {
-                    if (state.end && state.end.msn === index.lastSeqNo() && state.end.part === index.getSegment(index.lastSeqNo()).parts.length) {
-                        index.ended = state.ended = true;
-                        return index;
-                    }
-
-                    state.partIndex = ~~state.partIndex + 1;
-                    if (state.partIndex >= state.partCount) {
-                        state.partIndex = 0;
-                        state.firstSeqNo++;
-                    }
-                }
-
-                return index;
-            };
+            const { genLlIndex } = Shared;
 
             const expectedBytes = function (segment) {
 
-                if (segment.details.parts) {
-                    return segment.details.parts.reduce((val, part, idx) => val + (1000 + segment.msn) + 100 * idx, 0);
+                if (segment.entry.parts) {
+                    return segment.entry.parts.reduce((val, part, idx) => val + (1000 + segment.msn) + 100 * idx, 0);
                 }
 
                 return 5000 + segment.msn;
@@ -744,7 +538,7 @@ return;
                 }
 
                 expect(segments.length).to.equal(11);
-                expect(segments[0].segment.details.parts).to.have.length(5);
+                expect(segments[0].segment.entry.parts).to.have.length(5);
             });
 
             it('handles a basic low-latency stream with initial full segment', async () => {
