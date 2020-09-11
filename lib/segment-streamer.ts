@@ -69,7 +69,6 @@ const internals = {
 export type HlsSegmentStreamerOptions = {
     highWaterMark?: number;
     withData?: boolean; // default true
-    lowLatency?: boolean; // default true
 };
 
 // FIXME: Need to handle index updates to track lifetime of segments
@@ -77,7 +76,6 @@ export type HlsSegmentStreamerOptions = {
 export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U8IndependentSegment }, HlsSegmentObject, DuplexEvents<HlsSegmentObject>> {
 
     withData: boolean;
-    lowLatency: boolean;
 
     #readState = new (class ReadState {
         indexTokens = new Set<number>();
@@ -105,7 +103,6 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
         }
 
         this.withData = options.withData ?? true;
-        this.lowLatency = options.lowLatency ?? true;
 
         this.#downloader = new SegmentDownloader({ probe: !this.withData });
 
@@ -241,54 +238,15 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
 
         // Fetch the segment
 
-        if (!segment.isClosed && !this.lowLatency) {
+        if (!segment.isClosed) {
             await segment.closed;
         }
 
-        let fetch: FetchResult;
         if (segment.entry.isPartial()) {
-            if (!this.lowLatency) {
-                // TODO: log a warning??
-                return;
-            }
-
-            // Setup update tracker
-
-            segment.onUpdate = function (update, old) {
-
-                const usedParts = old ? old.parts?.length : update.parts?.length;
-
-                assert(update.parts);
-
-                const segmentParts = update.parts.slice(usedParts);
-                if (segmentParts.length === 0 && !this.isClosed) {
-                    return;      // No new parts
-                }
-
-                const parts = segmentParts.map((part) => ({
-                    uri: part.get('uri', AttrList.Types.String)!,
-                    byterange: part.has('byterange') ? Object.assign({ offset: 0 }, part.get('byterange', AttrList.Types.Byterange)) : undefined
-                }));
-
-                // TODO: handle update while starting fetch !!!!
-
-                fetch.stream.addParts(parts, this.isClosed);
-            };
-
-            // Prepare parts
-
-            assert(segment.entry.parts);
-
-            const parts = (segment.entry.parts ?? []).map((part) => ({
-                uri: part.get('uri', AttrList.Types.String)!,
-                byterange: part.has('byterange') ? Object.assign({ offset: 0 }, part.get('byterange', AttrList.Types.Byterange)) : undefined
-            }));
-
-            fetch = await this._fetchFrom(this._tokenForMsn(segment.msn), parts);
+            return;
         }
-        else {
-            fetch = await this._fetchFrom(this._tokenForMsn(segment.msn), { uri: segment.entry.uri!, byterange: segment.entry.byterange });
-        }
+
+        const fetch = await this._fetchFrom(this._tokenForMsn(segment.msn), { uri: segment.entry.uri!, byterange: segment.entry.byterange });
 
         // At this point object.stream has only been readied / opened
 
@@ -331,16 +289,10 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
         }
     }
 
-    private async _fetchFrom(token: number, parts: { uri: string; byterange?: Required<Byterange> } | { uri: string; byterange?: Required<Byterange> }[]) {
+    private async _fetchFrom(token: number, part: { uri: string; byterange?: Required<Byterange> }) {
 
-        let fetch;
-        if (Array.isArray(parts)) {
-            fetch = await this.#downloader.fetchParts(token, parts);
-        }
-        else {
-            const { uri, byterange } = parts;
-            fetch = await this.#downloader.fetchSegment(token, uri, byterange);
-        }
+        const { uri, byterange } = part;
+        const fetch = await this.#downloader.fetchSegment(token, uri, byterange);
 
         try {
             this.validateSegmentMeta(fetch.meta);

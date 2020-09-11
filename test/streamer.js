@@ -1,14 +1,10 @@
 'use strict';
 
 const Crypto = require('crypto');
-const Fs = require('fs');
 const Path = require('path');
-const Readable = require('stream').Readable;
 
 const Code = require('@hapi/code');
-const Hapi = require('@hapi/hapi');
 const Hoek = require('@hapi/hoek');
-const Inert = require('@hapi/inert');
 const Lab = require('@hapi/lab');
 const Uristream = require('uristream');
 
@@ -491,146 +487,5 @@ describe('HlsSegmentStreamer()', () => {
 
             reader.abort();
         });
-
-        describe('with lowLatency=true', () => {
-
-            const prepareLlReader = function (readerOptions = {}, state = {}, indexGen) {
-
-                return prepareLiveReader({
-                    lowLatency: true,
-                    withData: true,
-                    fullStream: false,
-                    ...readerOptions
-                }, {
-                    partIndex: 0,
-                    partCount: 5,
-                    index: indexGen,
-                    ...state
-                });
-            };
-
-            const { genLlIndex } = Shared;
-
-            const expectedBytes = function (segment) {
-
-                if (segment.entry.parts) {
-                    return segment.entry.parts.reduce((val, part, idx) => val + (1000 + segment.msn) + 100 * idx, 0);
-                }
-
-                return 5000 + segment.msn;
-            };
-
-            it('handles a basic low-latency stream', async () => {
-
-                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
-
-                const segments = [];
-                for await (const obj of reader) {
-                    expect(obj.segment.msn).to.equal(segments.length + 10);
-                    segments.push(obj);
-
-                    let bytes = 0;
-                    for await (const chunk of obj.stream) {
-                        bytes += chunk.length;
-                    }
-
-                    expect(bytes).to.equal(expectedBytes(obj.segment));
-                }
-
-                expect(segments.length).to.equal(11);
-                expect(segments[0].segment.entry.parts).to.have.length(5);
-            });
-
-            it('handles a basic low-latency stream with initial full segment', async () => {
-
-                const { reader, state } = prepareLlReader({}, { partIndex: 1, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
-
-                const segments = [];
-                for await (const obj of reader) {
-                    expect(obj.segment.msn).to.equal(segments.length + 9);
-                    segments.push(obj);
-
-                    let bytes = 0;
-                    for await (const chunk of obj.stream) {
-                        bytes += chunk.length;
-                    }
-
-                    expect(bytes).to.equal(expectedBytes(obj.segment));
-                }
-
-                expect(segments.length).to.equal(12);
-                expect(segments[0].segment.details.parts).to.not.exist();
-            });
-
-            it('handles a basic low-latency stream using byteranges', async () => {
-
-                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => {
-
-                    const index = genLlIndex(query, state);
-                    const firstMsn = index.first_seq_no;
-                    for (let msn = firstMsn; msn <= index.lastSeqNo(); ++msn) {     // eslint-disable-line @hapi/hapi/for-loop
-                        const segment = index.getSegment(msn);
-                        if (segment.parts) {
-                            for (let j = 0; j < segment.parts.length; ++j) {
-                                const part = segment.parts[j];
-                                part.set('uri', `${msn}.ts`, 'string');
-                                part.set('byterange', { length: 800 + j, offset: j === 0 ? 0 : undefined }, 'byterange');
-                            }
-                        }
-                    }
-
-                    return index;
-                });
-
-                const segments = [];
-                for await (const obj of reader) {
-                    expect(obj.segment.msn).to.equal(segments.length + 10);
-                    segments.push(obj);
-
-                    let bytes = 0;
-                    for await (const chunk of obj.stream) {
-                        bytes += chunk.length;
-                    }
-
-                    // TODO:
-//                    expect(bytes).to.equal(expectedBytes(obj.segment));
-
-                    // TODO: validate range request was performed
-                }
-
-                expect(segments.length).to.equal(11);
-                expect(segments[0].segment.details.parts).to.have.length(5);
-            });
-
-            // TODO: mp4 with initial map
-            // TODO: part jumps
-            // TODO: segment jumps
-            // TODO: out of index stall
-
-/*            it('handles a ll stream', async () => {
-
-                const { reader, state } = prepareLlReader({ lowLatency: false }, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
-                const segments = [];
-
-                for await (const obj of reader) {
-                    expect(obj.segment.msn).to.equal(segments.length);
-                    segments.push(obj);
-
-                    let bytes = 0;
-                    for await (const chunk of obj.stream) {
-                        bytes += chunk.length;
-                    }
-
-                    expect(bytes).to.equal(expectedBytes(obj.segment));
-                }
-
-                console.log('!!!', segments.map((obj) => obj.segment))
-                expect(segments.length).to.equal(13);
-            });*/
-        });
-
-        // handles fullStream option
-        // emits index updates
-        // TODO: resilience??
     });
 });
