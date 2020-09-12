@@ -1,6 +1,9 @@
 'use strict';
 
+const Fs = require('fs');
+const Os = require('os');
 const Path = require('path');
+const Url = require('url');
 
 const Boom = require('@hapi/boom');
 const Code = require('@hapi/code');
@@ -283,7 +286,7 @@ describe('HlsSegmentReader()', () => {
             return liveServer.stop();
         });
 
-        it('handles a basic stream', async () => {
+        it('handles a basic stream (http)', async () => {
 
             const { reader, state } = prepareLiveReader();
             const segments = [];
@@ -302,6 +305,48 @@ describe('HlsSegmentReader()', () => {
             }
 
             expect(segments).to.have.length(15);
+        });
+
+        it('handles a basic stream (file)', async () => {
+
+            const state = serverState.state = { firstSeqNo: 0, segmentCount: 10, targetDuration: 10 };
+
+            const tmpDir = await Fs.promises.mkdtemp(await Fs.promises.realpath(Os.tmpdir()) + Path.sep);
+            try {
+                const tmpUrl = new URL('next.m3u8', Url.pathToFileURL(tmpDir + Path.sep));
+                const indexUrl = new URL('index.m3u8', Url.pathToFileURL(tmpDir + Path.sep));
+                await Fs.promises.writeFile(indexUrl, Shared.genIndex(state).toString(), 'utf-8');
+
+                const reader = new HlsSegmentReader(indexUrl.href, { fullStream: true });
+                const segments = [];
+
+                (async () => {
+
+                    while (!state.ended) {
+                        await Hoek.wait(50);
+
+                        state.firstSeqNo++;
+                        if (state.firstSeqNo === 5) {
+                            state.ended = true;
+                        }
+
+                        // Atomic write
+
+                        await Fs.promises.writeFile(tmpUrl, Shared.genIndex(state).toString(), 'utf-8');
+                        await Fs.promises.rename(tmpUrl, indexUrl);
+                    }
+                })();
+
+                for await (const obj of reader) {
+                    expect(obj.msn).to.equal(segments.length);
+                    segments.push(obj);
+                }
+
+                expect(segments).to.have.length(15);
+            }
+            finally {
+                await Fs.promises.rmdir(tmpDir, { recursive: true });
+            }
         });
 
         it('handles sequence number resets', async () => {

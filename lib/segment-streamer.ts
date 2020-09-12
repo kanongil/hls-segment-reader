@@ -95,7 +95,7 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
 
     constructor(reader?: HlsSegmentReader, options: HlsSegmentStreamerOptions = {}) {
 
-        super({ objectMode: true, highWaterMark: (reader || {} as any).highWaterMark || options.highWaterMark || 0 });
+        super({ objectMode: true, highWaterMark: (reader || {} as any).highWaterMark ?? options.highWaterMark ?? 0 });
 
         if (typeof reader === 'object' && !(reader instanceof Stream)) {
             options = reader;
@@ -232,16 +232,13 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
 
                 const fetch = await this._fetchFrom(this._tokenForMsn(-1 - segment.msn), { uri, byterange });
 
-                this.push(new HlsSegmentObject(fetch.meta, fetch.stream, 'init', segment.entry.map));
+                this.push(new HlsSegmentObject(fetch.meta, fetch.stream, 'map', segment.entry.map));
             }
         }
 
         // Fetch the segment
 
-        if (!segment.isClosed) {
-            await segment.closed;
-        }
-
+        await segment.closed();
         if (segment.entry.isPartial()) {
             return;
         }

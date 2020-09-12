@@ -2,6 +2,7 @@ import type { MediaPlaylist, M3U8IndependentSegment, M3U8Segment } from 'm3u8par
 export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void; destroyed: boolean };
 
 import { watch } from 'fs';
+import { basename, dirname } from 'path';
 import { URL, fileURLToPath } from 'url';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -246,34 +247,45 @@ type FSWatcherEvents = 'rename' | 'change';
 
 export class FsWatcher {
 
-    #watcher: ReturnType<typeof watch>;
-    #last?: FSWatcherEvents;
-    #error?: Error;
-    #deferred?: Deferred<FSWatcherEvents>;
+    private _watcher: ReturnType<typeof watch>;
+    private _last?: FSWatcherEvents;
+    private _error?: Error;
+    private _deferred?: Deferred<FSWatcherEvents>;
 
     constructor(uri: URL | string) {
 
-        const change = (eventType: FSWatcherEvents) => {
+        const change = (eventType: FSWatcherEvents, name: string) => {
 
-            if (this.#deferred) {
-                this.#deferred.resolve(eventType);
-                this.#deferred = undefined;
+            if (name !== fileName) {
+                return;
             }
 
-            this.#last = eventType;
+            if (this._deferred) {
+                this._deferred.resolve(eventType);
+                this._deferred = undefined;
+                return;
+            }
+
+            this._last = eventType;
         };
 
         const error = (err: Error) => {
 
-            if (this.#deferred) {
-                this.#deferred.reject(err);
-                this.#deferred = undefined;
+            if (this._deferred) {
+                this._deferred.reject(err);
+                this._deferred = undefined;
             }
 
-            this.#error = err;
+            this._error = err;
         };
 
-        const watcher = this.#watcher = watch(fileURLToPath(uri), { persistent: false });
+        const path = fileURLToPath(uri);
+        const fileName = basename(path);
+        const dirName = dirname(path);
+
+        // Watch parent dir, since an atomic replace will have a new inode, and stop the watch for the path
+
+        const watcher = this._watcher = watch(dirName, { persistent: false });
 
         watcher.on('change', change);
         watcher.on('error', error);
@@ -281,7 +293,7 @@ export class FsWatcher {
 
             watcher.removeListener('change', change);
             watcher.removeListener('error', error);
-            this.#last = undefined;
+            this._last = undefined;
         });
     }
 
@@ -289,29 +301,29 @@ export class FsWatcher {
 
     next(): PromiseLike<FSWatcherEvents> | FSWatcherEvents {
 
-        if (this.#error) {
-            throw this.#error;
+        if (this._error) {
+            throw this._error;
         }
 
-        const last = this.#last;
+        const last = this._last;
         if (last !== undefined) {
-            this.#last = undefined;
+            this._last = undefined;
             return last;
         }
 
-        this.#deferred = new Deferred();
+        this._deferred = new Deferred();
 
-        return this.#deferred.promise;
+        return this._deferred.promise;
     }
 
     close(): void {
 
-        if (!this.#error) {
-            this.#watcher.close();
+        if (!this._error) {
+            this._watcher.close();
 
-            if (this.#deferred) {
-                this.#deferred.reject(new Error('closed'));
-                this.#deferred = undefined;
+            if (this._deferred) {
+                this._deferred.reject(new Error('closed'));
+                this._deferred = undefined;
             }
         }
     }

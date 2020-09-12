@@ -83,7 +83,7 @@ class SegmentPointer {
 export class HlsReaderObject {
 
     readonly msn: number;
-    readonly isClosed = false;
+    readonly isClosed: boolean;
 
     onUpdate?: ((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void);
 
@@ -93,7 +93,8 @@ export class HlsReaderObject {
     constructor(msn: number, segment: M3U8IndependentSegment) {
 
         this.msn = msn;
-        this._entry = segment;
+        this._entry = new M3U8Segment(segment) as M3U8IndependentSegment;
+        this.isClosed = !segment.isPartial();
     }
 
     get entry(): M3U8IndependentSegment {
@@ -106,18 +107,11 @@ export class HlsReaderObject {
         assert(!this.isClosed);
 
         const old = this._entry;
-        this._entry = entry;
+        this._entry = new M3U8Segment(entry) as M3U8IndependentSegment;
 
-        entry.discontinuity = !!(+entry.discontinuity | +old.discontinuity);
+        this._entry.discontinuity = !!(+entry.discontinuity | +old.discontinuity);
 
-        (<{ isClosed: boolean }> this).isClosed = !entry.isPartial();
-        if (this.isClosed && this.#closed) {
-            this.#closed.resolve(true);
-        }
-
-        if (this.onUpdate) {
-            process.nextTick(this.onUpdate.bind(this, entry, old));
-        }
+        this._update(!entry.isPartial(), old);
     }
 
     closed(): PromiseLike<true> | true {
@@ -133,15 +127,24 @@ export class HlsReaderObject {
         return this.#closed.promise;
     }
 
-    _abandon(): void {
+    abandon(): void {
 
-        if (!this.isClosed && this.onUpdate) {
-            process.nextTick(this.onUpdate.bind(this, this._entry));
+        if (!this.isClosed) {
+            return this._update(true);
+        }
+    }
+
+    private _update(closed: boolean, old?: M3U8IndependentSegment): void {
+
+        if (closed) {
+            (<{ isClosed: boolean }> this).isClosed = true;
+            if (this.#closed) {
+                this.#closed.resolve(true);
+            }
         }
 
-        (<{ isClosed: boolean }> this).isClosed = true;
-        if (this.#closed) {
-            this.#closed.resolve(true);
+        if (this.onUpdate) {
+            process.nextTick(this.onUpdate.bind(this, this._entry, old));
         }
     }
 }
@@ -163,6 +166,7 @@ export type HlsSegmentReaderOptions = {
 
 
 import { TypedReadable, ReadableEvents } from './raw/typed-readable';
+import { M3U8Segment } from 'm3u8parse';
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
     index: (index: M3U8Playlist) => void;
@@ -285,7 +289,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 try {
                     const last = this.#current;
                     this.#current = await this._getNextSegment();
-                    last?._abandon();
+                    last?.abandon();
                     ready = this.push(this.#current);
                 }
                 catch (err) {
@@ -528,7 +532,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
         const delayedUpdate = async (fromPlaylist: ParsedPlaylist, wasUpdated: boolean, wasError = false) => {
 
-            let delay = this._getUpdateInterval(fromPlaylist, wasUpdated && !wasError);
+            let delayMs = this._getUpdateInterval(fromPlaylist, wasUpdated && !wasError) * 1000;
 
             const url = new URL(this.url as any);
             if (url.protocol === 'data:') {
@@ -549,12 +553,12 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                     url.searchParams.set('_HLS_part', `${head.part}`);
                 }
 
-                delay = 0;
+                delayMs = 0;
             }
 
-            if (delay && this.#watcher) {
+            if (delayMs && this.#watcher) {
                 try {
-                    await Promise.race([wait(delay), this.#watcher.next()]);
+                    await Promise.race([wait(delayMs), this.#watcher.next()]);
                 }
                 catch (err) {
                     this.emit('problem', err);
@@ -562,7 +566,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 }
             }
             else {
-                await wait(delay);
+                await wait(delayMs);
             }
 
             assert(!this.destroyed, 'destroyed');
