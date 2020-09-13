@@ -8,8 +8,7 @@
     "strict": true,
     "strictNullChecks": true,
     "esModuleInterop": false,
-    "types": ["node"],
-    "outDir": "dist/"
+    "types": ["node"]
   },
   "include": [
       "lib"

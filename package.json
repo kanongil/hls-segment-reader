@@ -4,8 +4,13 @@
   "description": "Read segments from HLS streams using a Readable",
   "main": "lib",
   "scripts": {
+    "clean": "rm -f lib/*.{js,d.ts}",
+    "postpack": "npm run clean",
+    "prepack": "tsc",
     "test": "lab -t 90 -L",
-    "test-cov-html": "lab -c -r html -o coverage.html"
+    "test-full": "npm test && npm run test-js",
+    "test-cov-html": "lab -c -r html -o coverage.html",
+    "test-js": "tsc && lab --transform '' --t 0 && npm run clean"
   },
   "keywords": [
     "streaming",

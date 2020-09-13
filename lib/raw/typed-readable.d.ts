@@ -64,7 +64,7 @@ declare class TypedReadable<T = Buffer, L extends ListenerSignature<L> = Readabl
     emit<U extends keyof L>(event: U, ...args: Parameters<L[U]>): boolean;
     emit(event: string | symbol, ...args: any[]): boolean;
 
-    pipe<T extends NodeJS.WritableStream | Writable>(destination: T, options?: { end?: boolean; }): T;
+    pipe<S extends NodeJS.WritableStream | Writable>(destination: S, options?: { end?: boolean }): S;
     unpipe(destination?: NodeJS.WritableStream | Writable): this;
 }
 
@@ -75,8 +75,8 @@ declare class TypedWritable<T = Buffer, L extends ListenerSignature<L> = Writabl
     end(chunk: T, cb?: () => void): void;
     end(chunk: T, encoding: BufferEncoding, cb?: () => void): void;
 
-    _write<T>(chunk: T, encoding: BufferEncoding, callback: (error?: Error | null) => void): void;
-    _writev?<T>(chunks: Array<{ chunk: T, encoding?: BufferEncoding }>, callback: (error?: Error | null) => void): void;
+    _write(chunk: T, encoding: BufferEncoding, callback: (error?: Error | null) => void): void;
+    _writev?(chunks: Array<{ chunk: T; encoding?: BufferEncoding }>, callback: (error?: Error | null) => void): void;
 
     addListener<U extends keyof L>(event: U, listener: L[U]): this;
     prependListener<U extends keyof L>(event: U, listener: L[U]): this;
@@ -104,7 +104,7 @@ declare class TypedTransform<W = Buffer, R = Buffer, L extends ListenerSignature
     end(chunk: W, cb?: () => void): void;
     end(chunk: W, encoding: BufferEncoding, cb?: () => void): void;
 
-    _transform(chunk: W, encoding: BufferEncoding, callback: (error?: Error, data?: any) => void): void;    
+    _transform(chunk: W, encoding: BufferEncoding, callback: (error?: Error, data?: any) => void): void;
 
     addListener<U extends keyof L>(event: U, listener: L[U]): this;
     addListener(event: string | symbol, listener: (...args: any[]) => void): this;
@@ -121,6 +121,6 @@ declare class TypedTransform<W = Buffer, R = Buffer, L extends ListenerSignature
     emit<U extends keyof L>(event: U, ...args: Parameters<L[U]>): boolean;
     emit(event: string | symbol, ...args: any[]): boolean;
 
-    pipe<T extends NodeJS.WritableStream | Writable>(destination: T, options?: { end?: boolean; }): T;
+    pipe<T extends NodeJS.WritableStream | Writable>(destination: T, options?: { end?: boolean }): T;
     unpipe(destination?: NodeJS.WritableStream | Writable): this;
 }

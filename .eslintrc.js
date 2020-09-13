@@ -31,7 +31,7 @@ module.exports = {
     parserOptions: {
         ecmaVersion: 2019
     },
-    ignorePatterns: ['/lib/**/*.js', '/lib/**/*.d.ts'],
+    ignorePatterns: ['/lib/*.js', '/lib/*.d.ts'],
     overrides: [{
         files: ['lib/**/*.ts'],
         extends: [

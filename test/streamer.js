@@ -630,7 +630,7 @@ describe('HlsSegmentStreamer()', () => {
         });
 
         // TODO: test problem emit & data outage
-/*        it('handles a temporary server outage', async () => {
+        /*it('handles a temporary server outage', async () => {
 
             const { reader, state } = prepareLiveReader({}, {
                 index() {
