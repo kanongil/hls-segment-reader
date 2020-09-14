@@ -4,45 +4,6 @@ Read segments from any [Apple HLS](http://tools.ietf.org/html/draft-pantos-http-
 
 [![Build Status](https://travis-ci.org/kanongil/node-hls-segment-reader.svg?branch=master)](https://travis-ci.org/kanongil/node-hls-segment-reader)
 
-## API
-
-### new HlsSegmentReader(uri, [options])
-
-Creates an `objectMode` `Readable`, which returns segments from the `uri`, as specified in `options`.
-
-#### Options
-
- * `fullStream` - Always start from first segment. Otherwise, follow standard client behavior.
- * `withData` - Set to open & return data streams for each segment.
- * `startDate` - Select initial segment based on datetime information in the index.
- * `stopDate` - Stop stream after this date based on datetime information in the index.
- * `maxStallTime` - Stop live/event stream if index has not been updated in `maxStallTime` ms.
- * `extensions` - Allow specified index extensions, as specified in `m3u8parse`.
-
-### Event: `index`
-
- * `index` - `M3U8Playlist` with parsed index.
-
-Emitted whenever a new remote index has been parsed.
-
-### Event: `data`
-
- * `obj` - `HlsSegmentObject` containing segment data.
-
-### HlsSegmentReader#abort([graceful])
-
-Stop the reader.
-
-### HlsSegmentObject
-
- * `type` - `'segment'` or `'init'`.
- * `file` - File metadata from remote server.
- * `stream` - `uristream` `Readable` with segment data when `withData` is set.
- * `segment` - Object with segment data, when type is `'segment'`:
-   * `seq` - Sequence number.
-   * `details` - `M3U8Segment` info.
- * `init` - m3u8 `AttrList` with map segment data when type is `'init'`.
-
 ## Installation
 
 ```sh
