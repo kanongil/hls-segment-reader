@@ -80,8 +80,7 @@ exports.provisionLiveServer = function (shared) {
     const serveSegment = (request, h) => {
 
         if (shared.state.slow) {
-            const slowStream = new Readable();
-            slowStream._read = () => { };
+            const slowStream = new Readable({ read: Hoek.ignore });
 
             slowStream.push(Buffer.alloc(5000));
 
@@ -89,6 +88,18 @@ exports.provisionLiveServer = function (shared) {
         }
 
         const size = ~~(5000 / (request.params.part === undefined ? 1 : shared.state.partCount)) + parseInt(request.params.msn) + 100 * parseInt(request.params.part || 0);
+
+        if (shared.state.unstable) {
+            --shared.state.unstable;
+
+            const unstableStream = new Readable({ read: Hoek.ignore });
+
+            unstableStream.push(Buffer.alloc(50 - shared.state.unstable));
+            unstableStream.push(null);
+
+            return h.response(unstableStream).type('video/mp2t').bytes(size);
+        }
+
         return h.response(Buffer.alloc(size)).type('video/mp2t').bytes(size);
     };
 
@@ -138,7 +149,7 @@ exports.readSegments = (Class, ...args) => {
 };
 
 
-exports.genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCount, partIndex, ended }) {
+exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount, partIndex, ended }) {
 
     const partDuration = targetDuration / partCount;
 
@@ -151,14 +162,14 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCou
             for (let j = 0; j < partCount; ++j) {
                 parts.push(new M3U8Parse.AttrList({
                     duration: partDuration,
-                    uri: `"${firstSeqNo + i}-part${j}.ts"`
+                    uri: `"${firstMsn + i}-part${j}.ts"`
                 }));
             }
         }
 
         segments.push({
             duration: targetDuration || 2,
-            uri: `${firstSeqNo + i}.ts`,
+            uri: `${firstMsn + i}.ts`,
             title: '',
             parts: parts.length ? parts : undefined
         });
@@ -170,7 +181,7 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCou
             for (let i = 0; i < partIndex; ++i) {
                 parts.push(new M3U8Parse.AttrList({
                     duration: partDuration,
-                    uri: `"${firstSeqNo + segmentCount}-part${i}.ts"`
+                    uri: `"${firstMsn + segmentCount}-part${i}.ts"`
                 }));
             }
 
@@ -181,12 +192,12 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCou
 
         meta.preload_hints = [new M3U8Parse.AttrList({
             type: 'part',
-            uri: `"${firstSeqNo + segmentCount}-part${partIndex}.ts"`
+            uri: `"${firstMsn + segmentCount}-part${partIndex}.ts"`
         })];
     }
 
     const index = new M3U8Parse.M3U8Playlist({
-        first_seq_no: firstSeqNo,
+        media_sequence: firstMsn,
         target_duration: targetDuration,
         part_info: partCount ? new M3U8Parse.AttrList({ 'part-target': partDuration }) : undefined,
         segments,
@@ -194,7 +205,7 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstSeqNo, partCou
         ended
     });
 
-    //console.log('GEN', index.startSeqNo(true), index.lastSeqNo(true), index.meta.preload_hints);
+    //console.log('GEN', index.startMsn(true), index.lastMsn(true), index.meta.preload_hints);
 
     return index;
 };
@@ -213,7 +224,7 @@ exports.genLlIndex = function (query, state) {
             part = 0;
         }
 
-        state.firstSeqNo = msn - state.segmentCount;
+        state.firstMsn = msn - state.segmentCount;
         state.partIndex = part;
     }
 
@@ -228,7 +239,7 @@ exports.genLlIndex = function (query, state) {
 
     if (!state.ended) {
         if (state.end &&
-            index.lastSeqNo() > state.end.msn || (index.lastSeqNo() === state.end.msn && state.end.part === index.getSegment(index.lastSeqNo()).parts.length)) {
+            index.lastMsn() > state.end.msn || (index.lastMsn() === state.end.msn && state.end.part === index.getSegment(index.lastMsn()).parts.length)) {
 
             index.ended = state.ended = true;
             delete index.meta.preload_hints;
@@ -238,7 +249,7 @@ exports.genLlIndex = function (query, state) {
         state.partIndex = ~~state.partIndex + 1;
         if (state.partIndex >= state.partCount) {
             state.partIndex = 0;
-            state.firstSeqNo++;
+            state.firstMsn++;
         }
     }
 

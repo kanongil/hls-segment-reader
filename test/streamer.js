@@ -430,16 +430,16 @@ describe('HlsSegmentStreamer()', () => {
 
         it('supports the highWaterMark option', async () => {
 
-            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 2 });
+            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 3 });
             const buffered = [];
 
             for await (const obj of r) {
                 expect(obj).to.exist();
-                await Hoek.wait(20);
+                await Hoek.wait(100);
                 buffered.push(r.readableLength);
             }
 
-            expect(buffered).to.equal([2, 2, 2, 2, 1, 0]);
+            expect(buffered).to.equal([3, 3, 3, 2, 1, 0]);
         });
 
         it('abort() also aborts active streams when withData is set', async () => {
@@ -517,7 +517,7 @@ describe('HlsSegmentStreamer()', () => {
                 return undefined;
             };
 
-            serverState.state = { firstSeqNo: 0, segmentCount: 10, targetDuration: 2, ...state };
+            serverState.state = { firstMsn: 0, segmentCount: 10, targetDuration: 2, ...state };
 
             return { reader: streamer, state: serverState.state };
         };
@@ -543,8 +543,8 @@ describe('HlsSegmentStreamer()', () => {
                 segments.push(obj);
 
                 if (obj.segment.msn > 5) {
-                    state.firstSeqNo++;
-                    if (state.firstSeqNo === 5) {
+                    state.firstMsn++;
+                    if (state.firstMsn === 5) {
                         state.ended = true;
                         await Hoek.wait(50);
                     }
@@ -557,15 +557,15 @@ describe('HlsSegmentStreamer()', () => {
         it('handles sequence number resets', async () => {
 
             let reset = false;
-            const { reader, state } = prepareLiveReader({ fullStream: false }, { firstSeqNo: 10, async index() {
+            const { reader, state } = prepareLiveReader({ fullStream: false }, { firstMsn: 10, async index() {
 
                 const index = Shared.genIndex(state);
 
                 if (!reset) {
-                    state.firstSeqNo++;
+                    state.firstMsn++;
 
-                    if (state.firstSeqNo === 16) {
-                        state.firstSeqNo = 0;
+                    if (state.firstMsn === 16) {
+                        state.firstMsn = 0;
                         state.segmentCount = 1;
                         reset = true;
                     }
@@ -605,16 +605,16 @@ describe('HlsSegmentStreamer()', () => {
                 segments.push(obj);
 
                 if (!skipped && obj.segment.msn >= state.segmentCount - 1) {
-                    state.firstSeqNo++;
-                    if (state.firstSeqNo === 5) {
-                        state.firstSeqNo = 50;
+                    state.firstMsn++;
+                    if (state.firstMsn === 5) {
+                        state.firstMsn = 50;
                         skipped = true;
                     }
                 }
 
                 if (skipped && obj.segment.msn > 55) {
-                    state.firstSeqNo++;
-                    if (state.firstSeqNo === 55) {
+                    state.firstMsn++;
+                    if (state.firstMsn === 55) {
                         state.ended = true;
                         await Hoek.wait(50);
                     }
@@ -635,23 +635,23 @@ describe('HlsSegmentStreamer()', () => {
             const { reader, state } = prepareLiveReader({}, {
                 index() {
 
-                    if (state.error === undefined && state.firstSeqNo === 5) {
+                    if (state.error === undefined && state.firstMsn === 5) {
                         state.error = 6;
                     }
 
                     if (state.error) {
                         --state.error;
-                        ++state.firstSeqNo;
+                        ++state.firstMsn;
                         throw new Error('fail');
                     }
 
-                    if (state.firstSeqNo === 20) {
+                    if (state.firstMsn === 20) {
                         state.ended = true;
                     }
 
                     const index = Shared.genIndex(state);
 
-                    ++state.firstSeqNo;
+                    ++state.firstMsn;
 
                     return index;
                 }
@@ -675,14 +675,14 @@ describe('HlsSegmentStreamer()', () => {
 
             // Note: the eviction logic works on index updates, with a delay to allow an initial segment load some time to complete - otherwise it could be scheduled, have an immediate update, and be aborted before being given a chance
 
-            const { reader, state } = prepareLiveReader({ fullStream: true }, { slow: true, targetDuration: 0 });
+            const { reader, state } = prepareLiveReader({ fullStream: true }, { slow: true });
             const segments = [];
 
             for await (const obj of reader) {
                 segments.push(obj);
 
-                state.firstSeqNo++;
-                if (state.firstSeqNo === 3) {
+                state.firstMsn++;
+                if (state.firstMsn === 3) {
                     state.ended = true;
                 }
 
@@ -693,6 +693,34 @@ describe('HlsSegmentStreamer()', () => {
             expect(segments[0].stream.destroyed).to.be.true();
 
             reader.abort();
+        });
+
+        it('completes unstable downloads', async () => {
+
+            const { reader, state } = prepareLiveReader({}, { unstable: true });
+            const segments = [];
+
+            for await (const obj of reader) {
+                expect(obj.segment.msn).to.equal(segments.length + 6);
+                segments.push(obj);
+
+                let bytes = 0;
+                for await (const chunk of obj.stream) {
+                    bytes += chunk.length;
+                }
+
+                expect(bytes).to.equal(5000 + obj.segment.msn);
+
+                if (obj.segment.msn > 5) {
+                    state.firstMsn++;
+                    if (state.firstMsn === 5) {
+                        state.ended = true;
+                        await Hoek.wait(50);
+                    }
+                }
+            }
+
+            expect(segments.length).to.equal(9);
         });
     });
 });

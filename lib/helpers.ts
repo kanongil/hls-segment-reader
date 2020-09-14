@@ -1,4 +1,4 @@
-import type { MediaPlaylist, M3U8IndependentSegment, M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
+import type { MediaPlaylist, M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
 export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void; destroyed: boolean };
 
 import { watch } from 'fs';
@@ -60,6 +60,7 @@ type FetchOptions = {
     byterange?: Byterange;
     probe?: boolean;
     timeout?: number;
+    retries?: number;
 };
 
 type PartData = {
@@ -72,13 +73,13 @@ type PreloadHints = {
     map?: PartData;
 };
 
-export const performFetch = function (uri: URL | string, { byterange, probe = false, timeout }: FetchOptions = {}): AbortablePromise<FetchResult> {
+export const performFetch = function (uri: URL | string, { byterange, probe = false, timeout, retries = 1 }: FetchOptions = {}): AbortablePromise<FetchResult> {
 
     const streamOptions = Object.assign({
         probe,
         highWaterMark: internals.fetchBuffer,
         timeout: probe ? 30 * 1000 : timeout,
-        retries: 1
+        retries
     }, byterange ? {
         start: byterange.offset,
         end: byterange.length !== undefined ? byterange.offset + byterange.length - 1 : undefined
@@ -86,7 +87,7 @@ export const performFetch = function (uri: URL | string, { byterange, probe = fa
 
     const stream = UriStream(uri.toString(), streamOptions);
 
-    const promise: ReturnType<typeof performFetch> = new Promise((resolve, reject) => {
+    const promise = new Promise<FetchResult>((resolve, reject) => {
 
         const doFinish = (err: Error | null, meta?: Uristream.Meta) => {
 
@@ -98,10 +99,9 @@ export const performFetch = function (uri: URL | string, { byterange, probe = fa
                 return reject(err);
             }
 
-            const result = { meta, stream };
-            if (probe) {
+            const result = { meta, stream: !probe && stream || undefined };
+            if (!result.stream) {
                 stream.destroy();
-                delete result.stream;
             }
 
             return err ? reject(err) : resolve(result);
@@ -143,37 +143,9 @@ export class ParsedPlaylist {
         this.index = index;
     }
 
-    startMsn(full = false): number {
-
-        return this.index.startSeqNo(full);
-    }
-
-    lastMsn(includePartial = false): number {
-
-        return this.index.lastSeqNo(includePartial);
-    }
-
-    msnForDate(date: Date): number {
-
-        return this.index.seqNoForDate(date, true);
-    }
-
-    getResolvedSegment(msn: number, baseUri: URL | string): M3U8IndependentSegment | undefined {
-
-        const segment = this.index.getSegment(msn, true) ?? undefined;
-        if (segment) {
-            segment.rewriteUris((uri) => {
-
-                return uri !== undefined ? new URL(uri, baseUri).href : uri;
-            });
-        }
-
-        return segment;
-    }
-
     isSameHead(index: MediaPlaylist, includePartial = false): boolean {
 
-        const sameMsn = this.lastMsn(includePartial) === index.lastSeqNo(includePartial);
+        const sameMsn = this.index.lastMsn(includePartial) === index.lastMsn(includePartial);
         if (!sameMsn || !includePartial) {
             return sameMsn;
         }
@@ -192,12 +164,12 @@ export class ParsedPlaylist {
             const parts = lastSegment.parts || [];
 
             return {
-                msn: this.lastMsn(true) + +!hasPartialSegment,
+                msn: this.index.lastMsn(true) + +!hasPartialSegment,
                 part: hasPartialSegment ? parts.length : 0
             };
         }
 
-        return { msn: this.lastMsn(false) + 1 };
+        return { msn: this.index.lastMsn(false) + 1 };
     }
 
     get segments(): M3U8Segment[] {

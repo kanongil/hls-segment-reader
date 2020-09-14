@@ -27,9 +27,9 @@
   "dependencies": {
     "@hapi/boom": "^9.1.0",
     "@hapi/hoek": "^9.0.4",
-    "m3u8parse": "^3.0.0-beta.3",
+    "m3u8parse": "^3.0.0-beta.4",
     "readable-stream": "^3.3.0",
-    "uristream": "^6.0.1"
+    "uristream": "^6.0.2"
   },
   "devDependencies": {
     "@hapi/code": "^8.0.1",

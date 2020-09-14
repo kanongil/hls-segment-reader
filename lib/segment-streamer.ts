@@ -1,9 +1,10 @@
 
-import type { HlsSegmentReader, HlsReaderObject } from './segment-reader';
-import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
-import type { FetchResult, Byterange } from './helpers';
+import type { HlsSegmentReader, HlsReaderObject, HlsIndexMeta } from './segment-reader';
+import type { MediaPlaylist } from 'm3u8parse/lib/m3u8playlist';
+import type { FetchResult, Byterange, ReadableStream } from './helpers';
 
 import { Stream, finished } from 'stream';
+import { URL } from 'url';
 
 import { assert as hoekAssert } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse/lib/attrlist';
@@ -11,7 +12,6 @@ import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist';
 
 import { TypedTransform, DuplexEvents } from './raw/typed-readable';
 import { SegmentDownloader } from './segment-downloader';
-import { HlsSegmentObject } from './segment-object';
 
 import { types as MimeTypes } from 'mime-types';
 
@@ -66,24 +66,59 @@ const internals = {
     }
 };
 
+
+export class HlsStreamerObject {
+
+    type: 'segment' | 'map';
+    file: FetchResult['meta'];
+    stream?: ReadableStream;
+    segment?: HlsReaderObject;
+    attrs?: AttrList;
+
+    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'map', details: AttrList);
+    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment', details: HlsReaderObject);
+
+    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment' | 'map', details: HlsReaderObject | AttrList) {
+
+        const isSegment = type === 'segment';
+
+        this.type = type;
+        this.file = fileMeta;
+        this.stream = stream;
+
+        if (isSegment) {
+            this.segment = details as HlsReaderObject;
+        }
+        else {
+            this.attrs = details as AttrList;
+        }
+    }
+}
+
 export type HlsSegmentStreamerOptions = {
-    highWaterMark?: number;
     withData?: boolean; // default true
+    highWaterMark?: number;
 };
+
+interface HlsSegmentStreamerEvents extends DuplexEvents<HlsStreamerObject> {
+    index: (index: M3U8Playlist, meta: HlsIndexMeta) => void;
+    problem: (err: Error) => void;
+}
 
 // FIXME: Need to handle index updates to track lifetime of segments
 
-export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U8IndependentSegment }, HlsSegmentObject, DuplexEvents<HlsSegmentObject>> {
+export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStreamerObject, HlsSegmentStreamerEvents> {
 
-    withData: boolean;
+    baseUrl = 'unknown:';
+    readonly withData: boolean;
 
     #readState = new (class ReadState {
-        indexTokens = new Set<number>();
-        activeTokens = new Set<number>();
+        indexTokens = new Set<number | string>();
+        activeTokens = new Set<number | string>();
 
         //mapSeq: -1,
         map?: AttrList;
-        fetching: Promise<HlsSegmentObject> | null = null;
+        fetching: Promise<HlsStreamerObject> | null = null;
         //active: false;
         //discont: false;
     })();
@@ -95,7 +130,7 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
 
     constructor(reader?: HlsSegmentReader, options: HlsSegmentStreamerOptions = {}) {
 
-        super({ objectMode: true, highWaterMark: (reader || {} as any).highWaterMark ?? options.highWaterMark ?? 0 });
+        super({ objectMode: true, writableHighWaterMark: 0, readableHighWaterMark: (reader as any)?.highWaterMark ?? options.highWaterMark ?? 0 });
 
         if (typeof reader === 'object' && !(reader instanceof Stream)) {
             options = reader;
@@ -191,7 +226,9 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
 
     // Private methods
 
-    protected _onIndexUpdate(index: M3U8Playlist): void {
+    protected _onIndexUpdate(index: M3U8Playlist, meta: HlsIndexMeta): void {
+
+        this.baseUrl = meta.url;
 
         // Update active token list
 
@@ -200,7 +237,7 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
             this.#downloader.setValid(this.#readState.activeTokens);
         }
 
-        this.emit('index', index);
+        this.emit('index', index, meta);
     }
 
     private async _process(segment: HlsReaderObject): Promise<undefined> {
@@ -228,11 +265,43 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
 
                 // TODO: what should init token be to not be invalidated???
                 // TODO: what about fetch errors? Remove from this.#readState.map??
-                // FIXME: serialize processing while waiting for an init segment??
 
-                const fetch = await this._fetchFrom(this._tokenForMsn(-1 - segment.msn), { uri, byterange });
+                // Fetching the map is essential to the processing
 
-                this.push(new HlsSegmentObject(fetch.meta, fetch.stream, 'map', segment.entry.map));
+                let fetch: FetchResult | undefined;
+                let tries = 0;
+                do {
+                    try {
+                        tries++;
+                        fetch = await this._fetchFrom(this._tokenForMsn(segment.msn, segment.entry.map), { uri, byterange });
+                    }
+                    catch (err) {
+                        if (tries >= 4) {
+                            throw err;
+                        }
+
+                        this.emit('problem', new Error('Failed to fetch map: ' + err.message));
+
+                        // delay and retry
+
+                        await new Promise((resolve) => setTimeout(resolve, 200 * (segment.entry.duration || 4)));
+                        assert(!this.destroyed, 'destroyed');
+                    }
+                } while (!fetch);
+
+                assert(!this.destroyed, 'destroyed');
+                this.push(new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment.entry.map));
+
+                // It is a fatal inconsistency error, if the map stream fails to download
+
+                if (fetch.stream) {
+                    fetch.stream.once('error', (err) => {
+
+                        if (!this.destroyed) {
+                            this.destroy(new Error('Failed to download map data: ' + err.message));
+                        }
+                    });
+                }
             }
         }
 
@@ -244,6 +313,7 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
         }
 
         const fetch = await this._fetchFrom(this._tokenForMsn(segment.msn), { uri: segment.entry.uri!, byterange: segment.entry.byterange });
+        assert(!this.destroyed, 'destroyed');
 
         // At this point object.stream has only been readied / opened
 
@@ -270,7 +340,7 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
                 finished(fetch.stream, () => this.#active.delete(segment.msn));
             }
 
-            this.push(new HlsSegmentObject(fetch.meta, fetch.stream, 'segment', segment));
+            this.push(new HlsStreamerObject(fetch.meta, fetch.stream, 'segment', segment));
         }
         catch (err) {
             if (fetch.stream && !fetch.stream.destroyed) {
@@ -286,10 +356,10 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
         }
     }
 
-    private async _fetchFrom(token: number, part: { uri: string; byterange?: Required<Byterange> }) {
+    private async _fetchFrom(token: number | string, part: { uri: string; byterange?: Required<Byterange> }) {
 
         const { uri, byterange } = part;
-        const fetch = await this.#downloader.fetchSegment(token, uri, byterange);
+        const fetch = await this.#downloader.fetchSegment(token, new URL(uri, this.baseUrl), byterange);
 
         try {
             this.validateSegmentMeta(fetch.meta);
@@ -305,20 +375,31 @@ export class HlsSegmentStreamer extends TypedTransform<{ msn: number; entry: M3U
         }
     }
 
-    private _tokenForMsn(msn: number) {
+    private _tokenForMsn(msn: number, map?: AttrList): number | string {
 
-        return msn; // TODO: handle start over
+        if (map) {
+            return map.toString();
+        }
+
+        return msn; // TODO: handle start over – add generation
     }
 
     private _updateTokens(index: MediaPlaylist) {
 
         const old = this.#readState.indexTokens;
 
-        const current = new Set<number>();
-        for (let i = index.startSeqNo(true); i <= index.lastSeqNo(true); ++i) {
+        const current = new Set<number | string>();
+        for (let i = index.startMsn(true); i <= index.lastMsn(true); ++i) {
             const token = this._tokenForMsn(i);
             current.add(token);
             old.delete(token);
+
+            const map = index.getSegment(i)!.map;
+            if (map) {
+                const mapToken = this._tokenForMsn(i, map);
+                current.add(mapToken);
+                old.delete(mapToken);
+            }
         }
 
         this.#readState.indexTokens = current;

@@ -1,10 +1,12 @@
+import type { URL } from 'url';
+import type { Byterange } from './helpers';
+
 import { finished } from 'stream';
 import { promisify } from 'util';
 
 import { applyToDefaults, assert } from '@hapi/hoek';
 
 import {  performFetch } from './helpers';
-import type { Byterange } from './helpers';
 
 
 const internals = {
@@ -31,9 +33,9 @@ export class SegmentDownloader {
         this.probe = !!options.probe;
     }
 
-    fetchSegment(token: FetchToken, uri: string, byterange?: Required<Byterange>): ReturnType<typeof performFetch> {
+    fetchSegment(token: FetchToken, uri: URL, byterange?: Required<Byterange>, { tries = 3 } = {}): ReturnType<typeof performFetch> {
 
-        const promise = performFetch(uri, { byterange, probe: this.probe });
+        const promise = performFetch(uri, { byterange, probe: this.probe, retries: tries - 1 });
         this._startTracking(token, promise);
         return promise;
     }

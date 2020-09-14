@@ -270,7 +270,7 @@ describe('HlsSegmentReader()', () => {
                 return undefined;
             };
 
-            serverState.state = { firstSeqNo: 0, segmentCount: 10, targetDuration: 2, ...state };
+            serverState.state = { firstMsn: 0, segmentCount: 10, targetDuration: 2, ...state };
 
             return { reader, state: serverState.state };
         };
@@ -296,8 +296,8 @@ describe('HlsSegmentReader()', () => {
                 segments.push(obj);
 
                 if (obj.msn > 5) {
-                    state.firstSeqNo++;
-                    if (state.firstSeqNo === 5) {
+                    state.firstMsn++;
+                    if (state.firstMsn === 5) {
                         state.ended = true;
                         await Hoek.wait(50);
                     }
@@ -309,7 +309,7 @@ describe('HlsSegmentReader()', () => {
 
         it('handles a basic stream (file)', async () => {
 
-            const state = serverState.state = { firstSeqNo: 0, segmentCount: 10, targetDuration: 10 };
+            const state = serverState.state = { firstMsn: 0, segmentCount: 10, targetDuration: 10 };
 
             const tmpDir = await Fs.promises.mkdtemp(await Fs.promises.realpath(Os.tmpdir()) + Path.sep);
             try {
@@ -325,8 +325,8 @@ describe('HlsSegmentReader()', () => {
                     while (!state.ended) {
                         await Hoek.wait(50);
 
-                        state.firstSeqNo++;
-                        if (state.firstSeqNo === 5) {
+                        state.firstMsn++;
+                        if (state.firstMsn === 5) {
                             state.ended = true;
                         }
 
@@ -351,7 +351,7 @@ describe('HlsSegmentReader()', () => {
 
         it('handles sequence number resets', async () => {
 
-            const { reader, state } = prepareLiveReader({}, { firstSeqNo: 10 });
+            const { reader, state } = prepareLiveReader({}, { firstMsn: 10 });
             const segments = [];
             let reset = false;
 
@@ -359,10 +359,10 @@ describe('HlsSegmentReader()', () => {
                 segments.push(obj);
 
                 if (!reset) {
-                    state.firstSeqNo++;
+                    state.firstMsn++;
 
-                    if (state.firstSeqNo === 16) {
-                        state.firstSeqNo = 0;
+                    if (state.firstMsn === 16) {
+                        state.firstMsn = 0;
                         state.segmentCount = 1;
                         reset = true;
 
@@ -395,16 +395,16 @@ describe('HlsSegmentReader()', () => {
                 segments.push(obj);
 
                 if (!skipped && obj.msn >= state.segmentCount - 1) {
-                    state.firstSeqNo++;
-                    if (state.firstSeqNo === 5) {
-                        state.firstSeqNo = 50;
+                    state.firstMsn++;
+                    if (state.firstMsn === 5) {
+                        state.firstMsn = 50;
                         skipped = true;
                     }
                 }
 
                 if (skipped && obj.msn > 55) {
-                    state.firstSeqNo++;
-                    if (state.firstSeqNo === 55) {
+                    state.firstMsn++;
+                    if (state.firstMsn === 55) {
                         state.ended = true;
                         await Hoek.wait(50);
                     }
@@ -424,23 +424,23 @@ describe('HlsSegmentReader()', () => {
             const { reader, state } = prepareLiveReader({}, {
                 index() {
 
-                    if (state.error === undefined && state.firstSeqNo === 5) {
+                    if (state.error === undefined && state.firstMsn === 5) {
                         state.error = 6;
                     }
 
                     if (state.error) {
                         --state.error;
-                        ++state.firstSeqNo;
+                        ++state.firstMsn;
                         throw new Error('fail');
                     }
 
-                    if (state.firstSeqNo === 20) {
+                    if (state.firstMsn === 20) {
                         state.ended = true;
                     }
 
                     const index = Shared.genIndex(state);
 
-                    ++state.firstSeqNo;
+                    ++state.firstMsn;
 
                     return index;
                 }
@@ -465,7 +465,7 @@ describe('HlsSegmentReader()', () => {
             const { reader, state } = prepareLiveReader({ fullStream: false }, {
                 index() {
 
-                    if (state.firstSeqNo === 50) {
+                    if (state.firstMsn === 50) {
                         state.ended = true;
                     }
 
@@ -477,7 +477,7 @@ describe('HlsSegmentReader()', () => {
             for await (const obj of reader) {
                 segments.push(obj);
 
-                state.firstSeqNo += 5;
+                state.firstMsn += 5;
                 await Hoek.wait(10);
             }
 
@@ -514,7 +514,7 @@ describe('HlsSegmentReader()', () => {
                 const { reader, state } = prepareLiveReader({ fullStream: false }, {
                     async index() {
 
-                        if (state.firstSeqNo > 0) {
+                        if (state.firstMsn > 0) {
                             await Hoek.wait(100);
                         }
 
@@ -528,7 +528,7 @@ describe('HlsSegmentReader()', () => {
                 for await (const obj of reader) {
                     segments.push(obj);
 
-                    state.firstSeqNo++;
+                    state.firstMsn++;
                 }
 
                 expect(segments).to.have.length(4);
@@ -539,7 +539,7 @@ describe('HlsSegmentReader()', () => {
                 const { reader, state } = prepareLiveReader({ fullStream: false }, {
                     async index() {
 
-                        if (state.firstSeqNo > 0) {
+                        if (state.firstMsn > 0) {
                             await Hoek.wait(10);
                         }
 
@@ -552,7 +552,7 @@ describe('HlsSegmentReader()', () => {
                 await expect((async () => {
 
                     for await (const {} of reader) {
-                        state.firstSeqNo++;
+                        state.firstMsn++;
                     }
                 })()).to.reject('destroyed');
             });
@@ -579,14 +579,14 @@ describe('HlsSegmentReader()', () => {
                                     throw Boom.unauthorized();
                             }
                         }
-                        else if (state.firstSeqNo === 5) {
+                        else if (state.firstMsn === 5) {
                             state.error = 1;
                             return '';
                         }
 
                         const index = Shared.genIndex(state);
 
-                        ++state.firstSeqNo;
+                        ++state.firstMsn;
 
                         return index;
                     }
@@ -758,10 +758,10 @@ describe('HlsSegmentReader()', () => {
                 const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => {
 
                     const index = genLlIndex(query, state);
-                    const firstMsn = index.first_seq_no;
+                    const firstMsn = index.media_sequence;
                     let segment;
                     let offset;
-                    for (let msn = firstMsn; msn <= index.lastSeqNo(); ++msn) {     // eslint-disable-line @hapi/hapi/for-loop
+                    for (let msn = firstMsn; msn <= index.lastMsn(); ++msn) {     // eslint-disable-line @hapi/hapi/for-loop
                         segment = index.getSegment(msn);
                         offset = 0;
                         if (segment.parts) {
@@ -776,7 +776,7 @@ describe('HlsSegmentReader()', () => {
 
                     if (index.meta.preload_hints) {
                         const hint = index.meta.preload_hints[0];
-                        hint.set('uri', `${index.lastSeqNo() + +!segment.isPartial()}.ts`, 'string');
+                        hint.set('uri', `${index.lastMsn() + +!segment.isPartial()}.ts`, 'string');
                         hint.set('byterange-start', segment.isPartial() ? offset : 0, 'int');
                     }
 
@@ -806,7 +806,7 @@ describe('HlsSegmentReader()', () => {
                     // Jump during active part
 
                     if (query._HLS_msn === 13 && query._HLS_part === 2) {
-                        state.firstSeqNo += 5;
+                        state.firstMsn += 5;
                         state.partIndex = 4;
                         query = {};
                     }

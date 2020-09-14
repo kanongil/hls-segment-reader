@@ -2,6 +2,7 @@ import type { Stream } from 'stream';
 import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
 import { FetchResult, Deferred } from './helpers';
 
+
 import { hrtime } from 'process';
 import { URL } from 'url';
 
@@ -9,9 +10,10 @@ import { Boom } from '@hapi/boom';
 import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse/lib/attrlist';
 import M3U8Parse, { ParserError } from 'm3u8parse/lib/m3u8parse';
-import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist';
+import { M3U8Playlist, M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
 
 import { ParsedPlaylist, FsWatcher, performFetch } from './helpers';
+import { TypedReadable, ReadableEvents } from './raw/typed-readable';
 
 
 // eslint-disable-next-line func-style
@@ -156,8 +158,8 @@ export type HlsSegmentReaderOptions = {
     /** True to handle LL-HLS streams */
     lowLatency?: boolean;
 
-    startDate?: Date;
-    stopDate?: Date;
+    startDate?: Date | string | number;
+    stopDate?: Date | string | number;
 
     maxStallTime?: number;
 
@@ -165,11 +167,13 @@ export type HlsSegmentReaderOptions = {
 };
 
 
-import { TypedReadable, ReadableEvents } from './raw/typed-readable';
-import { M3U8Segment } from 'm3u8parse';
+export type HlsIndexMeta = {
+    url: string;
+    modified?: Date;
+};
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
-    index: (index: M3U8Playlist) => void;
+    index: (index: M3U8Playlist, meta: HlsIndexMeta) => void;
     problem: (err: Error) => void;
 }
 
@@ -191,13 +195,14 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     baseUrl: string;
     readonly fullStream: boolean;
     readonly lowLatency: boolean;
-    readonly startDate: Date | null;
-    readonly stopDate: Date | null;
-    readonly stallAfterMs: number;
+    startDate?: Date;
+    stopDate?: Date;
+    stallAfterMs: number;
     readonly extensions: HlsSegmentReaderOptions['extensions'];
 
     #next = new SegmentPointer();
     #discont = false;
+    #rejected = 0;
     #indexStalledAt: bigint | null = null;
     #index?: M3U8Playlist;
     #playlist?: ParsedPlaylist;
@@ -219,8 +224,8 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
         // Dates are inclusive
 
-        this.startDate = options.startDate ? new Date(options.startDate) : null;
-        this.stopDate = options.stopDate ? new Date(options.stopDate) : null;
+        this.startDate = options.startDate ? new Date(options.startDate) : undefined;
+        this.stopDate = options.stopDate ? new Date(options.stopDate) : undefined;
 
         this.stallAfterMs = options.maxStallTime ?? Infinity;
 
@@ -340,8 +345,8 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
             if (this.#next.isEmpty()) {
                 this.#next = this._initialSegmentPointer(playlist);
             }
-            else if ((this.#next.msn < playlist.startMsn(true)) ||
-                     (this.#next.msn > (playlist.lastMsn(this.lowLatency) + 1))) {
+            else if ((this.#next.msn < playlist.index.startMsn(true)) ||
+                     (this.#next.msn > (playlist.index.lastMsn(this.lowLatency) + 1))) {
 
                 // Playlist jump
 
@@ -349,12 +354,14 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                     throw new Error('Fatal playlist inconsistency');
                 }
 
-                this.#next = new SegmentPointer(playlist.startMsn(true), this.lowLatency ? 0 : undefined);
+                this.emit('problem', new Error('Playlist jump'));
+
+                this.#next = new SegmentPointer(playlist.index.startMsn(true), this.lowLatency ? 0 : undefined);
                 this.#discont = true;
             }
 
             const next = this.#next;
-            const segment = playlist.getResolvedSegment(next.msn, this.baseUrl);
+            const segment = playlist.index.getSegment(next.msn, true);
             if (!segment ||
                 (next.part === undefined && segment.isPartial()) ||
                 (next.part && next.part >= (segment?.parts?.length || 0))) {
@@ -451,7 +458,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     private _initialSegmentPointer(playlist: ParsedPlaylist): SegmentPointer {
 
         if (!this.fullStream && this.startDate) {
-            const msn = playlist.msnForDate(this.startDate);
+            const msn = playlist.index.msnForDate(this.startDate, true);
             if (msn >= 0) {
                 return new SegmentPointer(msn, this.lowLatency ? 0 : undefined);
             }
@@ -461,7 +468,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
         if (this.lowLatency && playlist.serverControl.partHoldBack) {
             let partHoldBack = playlist.serverControl.partHoldBack;
-            let msn = playlist.lastMsn(true);
+            let msn = playlist.index.lastMsn(true);
             let segment;
             while (segment = playlist.index.getSegment(msn)) {
                 // TODO: use INDEPENDENT=YES information for better start point
@@ -484,10 +491,26 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
             return new SegmentPointer(msn, 0);
         }
 
-        return new SegmentPointer(playlist.startMsn(this.fullStream), this.lowLatency ? 0 : undefined);
+        // TODO: use start offset, when present
+
+        return new SegmentPointer(playlist.index.startMsn(this.fullStream), this.lowLatency ? 0 : undefined);
     }
 
     protected _preprocessIndex(index: M3U8Playlist): M3U8Playlist | undefined {
+
+        // Reject "old" index updates (eg. from CDN cached response & hitting multiple endpoints)
+
+        if (this.index && this.#rejected < 3) {
+            if (index.lastMsn(true) < this.index.lastMsn(true)) {
+                this.#rejected++;
+                this.emit('problem', new Error('Rejected update from the past'));
+                return this.index;
+            }
+
+            // TODO: reject other strange updates??
+        }
+
+        this.#rejected = 0;
 
         /*if (!this.lowLatency) {
 
@@ -601,7 +624,8 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                     }
 
                     if (updated) {
-                        process.nextTick(this.emit.bind(this, 'index', new M3U8Playlist(this.#index)));
+                        const indexMeta: HlsIndexMeta = { url: meta.url, modified: meta.modified !== null ? new Date(meta.modified) : undefined };
+                        process.nextTick(this.emit.bind(this, 'index', new M3U8Playlist(this.#index), indexMeta));
                     }
 
                     this._emitHintsNT(this.#playlist);
@@ -613,7 +637,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                     // Update current entry
 
                     if (this.#playlist && this.#current && !this.#current.isClosed) {
-                        const currentSegment = this.#playlist.getResolvedSegment(this.#current.msn, this.baseUrl);
+                        const currentSegment = this.#index.getSegment(this.#current.msn, true);
                         if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
                             this.#current.entry = currentSegment;
                         }
@@ -636,7 +660,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
                 if (!this.destroyed && this.#index) {
                     if (this.#playlist?.index.isLive()) {
-                        this.#nextUpdate = delayedUpdate(this.#playlist, updated, errored);
+                        this.#nextUpdate = delayedUpdate(this.#playlist, updated, errored || this.#rejected > 1);
                     }
                     else {
                         this.#nextUpdate = Promise.reject(new Error('Index cannot be updated'));
