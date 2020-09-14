@@ -1,8 +1,11 @@
-import { HlsSegmentReader, HlsReaderObject, HlsSegmentReaderOptions } from './segment-reader';
-import { HlsSegmentStreamer, HlsStreamerObject, HlsSegmentStreamerOptions } from './segment-streamer';
+import { HlsSegmentReader, HlsSegmentReaderOptions } from './segment-reader';
+import { HlsSegmentStreamer, HlsSegmentStreamerOptions } from './segment-streamer';
 
+export { HlsReaderObject } from './segment-reader';
+export type { HlsIndexMeta } from './segment-reader';
+export { HlsStreamerObject } from './segment-streamer';
 
-const exp = function createSimpleReader(uri: string, options: HlsSegmentReaderOptions & HlsSegmentStreamerOptions = {}): HlsSegmentStreamer {
+const createSimpleReader = function (uri: string, options: HlsSegmentReaderOptions & HlsSegmentStreamerOptions = {}): HlsSegmentStreamer {
 
     const reader = new HlsSegmentReader(uri, options);
 
@@ -15,12 +18,7 @@ const exp = function createSimpleReader(uri: string, options: HlsSegmentReaderOp
     return streamer;
 };
 
-exp.HlsSegmentReader = HlsSegmentReader;
+export { createSimpleReader, HlsSegmentReader, HlsSegmentStreamer };
+export type { HlsSegmentReaderOptions };
 
-exp.HlsSegmentStreamer = HlsSegmentStreamer;
-
-exp.HlsReaderObject = HlsReaderObject;
-
-exp.HlsStreamerObject = HlsStreamerObject;
-
-export = exp;
+export default createSimpleReader;

@@ -196,7 +196,7 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
         })];
     }
 
-    const index = new M3U8Parse.M3U8Playlist({
+    const index = new M3U8Parse.MediaPlaylist({
         media_sequence: firstMsn,
         target_duration: targetDuration,
         part_info: partCount ? new M3U8Parse.AttrList({ 'part-target': partDuration }) : undefined,

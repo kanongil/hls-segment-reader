@@ -1,5 +1,4 @@
 import type { Stream } from 'stream';
-import type { MediaPlaylist, M3U8IndependentSegment } from 'm3u8parse/lib/m3u8playlist';
 import { FetchResult, Deferred } from './helpers';
 
 
@@ -8,9 +7,7 @@ import { URL } from 'url';
 
 import { Boom } from '@hapi/boom';
 import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
-import { AttrList } from 'm3u8parse/lib/attrlist';
-import M3U8Parse, { ParserError } from 'm3u8parse/lib/m3u8parse';
-import { M3U8Playlist, M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
+import M3U8Parse, { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList, ParserError } from 'm3u8parse';
 
 import { ParsedPlaylist, FsWatcher, performFetch } from './helpers';
 import { TypedReadable, ReadableEvents } from './raw/typed-readable';
@@ -87,29 +84,29 @@ export class HlsReaderObject {
     readonly msn: number;
     readonly isClosed: boolean;
 
-    onUpdate?: ((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void) = undefined;
+    onUpdate?: ((entry: IndependentSegment, old?: IndependentSegment) => void) = undefined;
 
-    private _entry: M3U8IndependentSegment;
+    private _entry: IndependentSegment;
     #closed?: Deferred<true>;
 
-    constructor(msn: number, segment: M3U8IndependentSegment) {
+    constructor(msn: number, segment: IndependentSegment) {
 
         this.msn = msn;
-        this._entry = new M3U8Segment(segment) as M3U8IndependentSegment;
+        this._entry = new MediaSegment(segment) as IndependentSegment;
         this.isClosed = !segment.isPartial();
     }
 
-    get entry(): M3U8IndependentSegment {
+    get entry(): IndependentSegment {
 
         return this._entry;
     }
 
-    set entry(entry: M3U8IndependentSegment) {
+    set entry(entry: IndependentSegment) {
 
         assert(!this.isClosed);
 
         const old = this._entry;
-        this._entry = new M3U8Segment(entry) as M3U8IndependentSegment;
+        this._entry = new MediaSegment(entry) as IndependentSegment;
 
         this._entry.discontinuity = !!(+entry.discontinuity | +old.discontinuity);
 
@@ -136,7 +133,7 @@ export class HlsReaderObject {
         }
     }
 
-    private _update(closed: boolean, old?: M3U8IndependentSegment): void {
+    private _update(closed: boolean, old?: IndependentSegment): void {
 
         if (closed) {
             (<{ isClosed: boolean }> this).isClosed = true;
@@ -173,7 +170,7 @@ export type HlsIndexMeta = {
 };
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
-    index: (index: M3U8Playlist, meta: HlsIndexMeta) => void;
+    index: (index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta) => void;
     problem: (err: Error) => void;
 }
 
@@ -204,7 +201,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     #discont = false;
     #rejected = 0;
     #indexStalledAt: bigint | null = null;
-    #index?: M3U8Playlist;
+    #index?: MediaPlaylist | MasterPlaylist;
     #playlist?: ParsedPlaylist;
     #current: HlsReaderObject | null = null;
     #currentHints: ParsedPlaylist['preloadHints'] = {};
@@ -234,7 +231,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         this._keepIndexUpdated();
     }
 
-    get index(): M3U8Playlist | undefined {
+    get index(): MediaPlaylist | MasterPlaylist | undefined {
 
         return this.#index;
     }
@@ -492,15 +489,15 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         return new SegmentPointer(playlist.index.startMsn(this.fullStream), this.lowLatency ? 0 : undefined);
     }
 
-    protected _preprocessIndex(index: M3U8Playlist): M3U8Playlist | undefined {
+    protected _preprocessIndex<T extends MediaPlaylist | MasterPlaylist>(index: T): T | undefined {
 
         // Reject "old" index updates (eg. from CDN cached response & hitting multiple endpoints)
 
-        if (this.index && this.#rejected < 3) {
-            if (index.lastMsn(true) < this.index.lastMsn(true)) {
+        if (this.index && !this.index.master && this.#rejected < 3) {
+            if (MediaPlaylist.cast(index).lastMsn(true) < this.index.lastMsn(true)) {
                 this.#rejected++;
                 this.emit('problem', new Error('Rejected update from the past'));
-                return this.index;
+                return this.index as T;
             }
 
             // TODO: reject other strange updates??
@@ -614,14 +611,14 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 this.#index = this._preprocessIndex(rawIndex);
 
                 if (this.#index) {
-                    this.#playlist = !this.#index.master ? new ParsedPlaylist(M3U8Playlist.castAsMedia(this.#index)) : undefined;
+                    this.#playlist = !this.#index.master ? new ParsedPlaylist(MediaPlaylist.cast(this.#index)) : undefined;
                     if (this.#playlist?.index.isLive()) {
                         updated = !fromIndex || this.#playlist.index.ended || !this.#playlist.isSameHead(fromIndex);
                     }
 
                     if (updated) {
                         const indexMeta: HlsIndexMeta = { url: meta.url, modified: meta.modified !== null ? new Date(meta.modified) : undefined };
-                        process.nextTick(this.emit.bind(this, 'index', new M3U8Playlist(this.#index), indexMeta));
+                        process.nextTick(this.emit.bind(this, 'index', this.#index.master ? new MasterPlaylist(this.#index) : new MediaPlaylist(this.#index), indexMeta));
                     }
 
                     this._emitHintsNT(this.#playlist);
@@ -633,7 +630,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                     // Update current entry
 
                     if (this.#playlist && this.#current && !this.#current.isClosed) {
-                        const currentSegment = this.#index.getSegment(this.#current.msn, true);
+                        const currentSegment = this.#playlist.index.getSegment(this.#current.msn, true);
                         if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
                             this.#current.entry = currentSegment;
                         }

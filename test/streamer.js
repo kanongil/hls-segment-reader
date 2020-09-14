@@ -6,14 +6,13 @@ const Path = require('path');
 const Code = require('@hapi/code');
 const Hoek = require('@hapi/hoek');
 const Lab = require('@hapi/lab');
-const { M3U8Segment, AttrList } = require('m3u8parse');
+const { MediaSegment, AttrList } = require('m3u8parse');
 const Uristream = require('uristream');
 
 const Shared = require('./_shared');
 
 // eslint-disable-next-line @hapi/hapi/capitalize-modules
-const createSimpleReader = require('..');
-const { HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer } = require('..');
+const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer } = require('..');
 
 
 // Declare internals
@@ -145,7 +144,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer({ highWaterMark: 0 });
             const iter = streamer[Symbol.asyncIterator]();
 
-            streamer.write(new HlsReaderObject(0, new M3U8Segment({
+            streamer.write(new HlsReaderObject(0, new MediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
             })));
@@ -162,7 +161,7 @@ describe('HlsSegmentStreamer()', () => {
 
             const streamer = new HlsSegmentStreamer({});
 
-            const segment = new M3U8Segment({
+            const segment = new MediaSegment({
                 uri: 'data:video/mp2t,DATA',
                 duration: 2,
                 map: new AttrList({ uri: '"data:video/mp2t,MAP"', value: 'OK' })
@@ -190,16 +189,16 @@ describe('HlsSegmentStreamer()', () => {
 
             const streamer = new HlsSegmentStreamer({});
 
-            const segment = new M3U8Segment({
+            const segment = new MediaSegment({
                 uri: 'data:video/mp2t,DATA',
                 duration: 2
             });
 
             streamer.write(new HlsReaderObject(0, segment));
-            streamer.write(new HlsReaderObject(1, new M3U8Segment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP1"' }) })));
-            streamer.write(new HlsReaderObject(2, new M3U8Segment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP2"' }) })));
-            streamer.write(new HlsReaderObject(3, new M3U8Segment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '2@0' }) })));
-            streamer.write(new HlsReaderObject(4, new M3U8Segment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '3@1' }) })));
+            streamer.write(new HlsReaderObject(1, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP1"' }) })));
+            streamer.write(new HlsReaderObject(2, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP2"' }) })));
+            streamer.write(new HlsReaderObject(3, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '2@0' }) })));
+            streamer.write(new HlsReaderObject(4, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '3@1' }) })));
             streamer.write(new HlsReaderObject(5, segment));
             streamer.end();
 
@@ -228,7 +227,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer();
             const iter = streamer[Symbol.asyncIterator]();
 
-            const segment = new HlsReaderObject(0, new M3U8Segment({
+            const segment = new HlsReaderObject(0, new MediaSegment({
                 parts: [new AttrList(), new AttrList()]
             }));
 
@@ -246,7 +245,7 @@ describe('HlsSegmentStreamer()', () => {
             const promise = internals.nextValue(iter);
             expect(await Promise.race([waitingForClosed, promise])).to.equal('closed');
 
-            segment.entry = new M3U8Segment({
+            segment.entry = new MediaSegment({
                 ...segment.entry,
                 uri: 'data:video/mp2t,TS',
                 duration: 2
@@ -264,7 +263,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer();
             const iter = streamer[Symbol.asyncIterator]();
 
-            const segment = new HlsReaderObject(0, new M3U8Segment({
+            const segment = new HlsReaderObject(0, new MediaSegment({
                 parts: [new AttrList()]
             }));
 
@@ -282,7 +281,7 @@ describe('HlsSegmentStreamer()', () => {
             const promise = internals.nextValue(iter);
             expect(await Promise.race([waitingForClosed, promise])).to.equal('closed');
 
-            segment.entry = new M3U8Segment({
+            segment.entry = new MediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
             });
@@ -299,7 +298,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer();
             const iter = streamer[Symbol.asyncIterator]();
 
-            const segment = new HlsReaderObject(0, new M3U8Segment({
+            const segment = new HlsReaderObject(0, new MediaSegment({
                 parts: [new AttrList()]
             }));
 
@@ -313,7 +312,7 @@ describe('HlsSegmentStreamer()', () => {
             });
 
             streamer.write(segment);
-            streamer.write(new HlsReaderObject(1, new M3U8Segment({
+            streamer.write(new HlsReaderObject(1, new MediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
             })));

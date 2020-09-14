@@ -1,14 +1,13 @@
 
 import type { HlsSegmentReader, HlsReaderObject, HlsIndexMeta } from './segment-reader';
-import type { MediaPlaylist } from 'm3u8parse/lib/m3u8playlist';
+import type { MasterPlaylist, MediaPlaylist } from 'm3u8parse';
 import type { FetchResult, Byterange, ReadableStream } from './helpers';
 
 import { Stream, finished } from 'stream';
 import { URL } from 'url';
 
 import { assert as hoekAssert } from '@hapi/hoek';
-import { AttrList } from 'm3u8parse/lib/attrlist';
-import { M3U8Playlist } from 'm3u8parse/lib/m3u8playlist';
+import { AttrList } from 'm3u8parse';
 
 import { TypedTransform, DuplexEvents } from './raw/typed-readable';
 import { SegmentDownloader } from './segment-downloader';
@@ -33,8 +32,6 @@ function assertReaderObject(obj: any, message: string): asserts obj is HlsReader
 
     assert(typeof obj.msn === 'number' && obj.entry, message);
 }
-
-// TODO: don't error on abort while fetching meta !!!!!
 
 
 const internals = {
@@ -101,7 +98,7 @@ export type HlsSegmentStreamerOptions = {
 };
 
 interface HlsSegmentStreamerEvents extends DuplexEvents<HlsStreamerObject> {
-    index: (index: M3U8Playlist, meta: HlsIndexMeta) => void;
+    index: (index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta) => void;
     problem: (err: Error) => void;
 }
 
@@ -195,7 +192,7 @@ export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStrea
         this.abort(!!err);
     }
 
-    get index(): M3U8Playlist | undefined {
+    get index(): MediaPlaylist | MasterPlaylist | undefined {
 
         return this.#reader ? this.#reader.index : undefined;
     }
@@ -226,14 +223,14 @@ export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStrea
 
     // Private methods
 
-    protected _onIndexUpdate(index: M3U8Playlist, meta: HlsIndexMeta): void {
+    protected _onIndexUpdate(index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta): void {
 
         this.baseUrl = meta.url;
 
         // Update active token list
 
         if (!index.master) {
-            this._updateTokens(M3U8Playlist.castAsMedia(index));
+            this._updateTokens(index);
             this.#downloader.setValid(this.#readState.activeTokens);
         }
 
@@ -262,9 +259,6 @@ export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStrea
                         length: parseInt(length, 10)
                     };
                 }
-
-                // TODO: what should init token be to not be invalidated???
-                // TODO: what about fetch errors? Remove from this.#readState.map??
 
                 // Fetching the map is essential to the processing
 
@@ -403,13 +397,6 @@ export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStrea
         }
 
         this.#readState.indexTokens = current;
-        if (this.#readState.discont) {
-            this.#readState.activeTokens = this.#readState.indexTokens;
-        }
-        else {
-            // Keep expired tokens until next update
-
-            this.#readState.activeTokens = new Set([...old, ...current]);
-        }
+        this.#readState.activeTokens = new Set([...old, ...current]);
     }
 }

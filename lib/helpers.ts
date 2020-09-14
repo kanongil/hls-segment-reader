@@ -1,4 +1,4 @@
-import type { MediaPlaylist, M3U8Segment } from 'm3u8parse/lib/m3u8playlist';
+import type { MediaPlaylist, MediaSegment } from 'm3u8parse';
 export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void; destroyed: boolean };
 
 import { watch } from 'fs';
@@ -172,7 +172,7 @@ export class ParsedPlaylist {
         return { msn: this.index.lastMsn(false) + 1 };
     }
 
-    get segments(): M3U8Segment[] {
+    get segments(): MediaSegment[] {
 
         return this.index.segments;
     }
