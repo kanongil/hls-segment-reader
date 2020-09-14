@@ -50,6 +50,7 @@ declare class TypedReadable<T = Buffer, L extends ListenerSignature<L> = Readabl
     push(chunk: T | null): boolean;
     unshift(chunk: T | null): boolean;
     read(size?: number): T | null;
+    //[Symbol.asyncIterator]: AsyncIterableIterator<T>;        // Not possible, since it must support any
 
     addListener<U extends keyof L>(event: U, listener: L[U]): this;
     prependListener<U extends keyof L>(event: U, listener: L[U]): this;

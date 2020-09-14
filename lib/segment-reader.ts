@@ -87,7 +87,7 @@ export class HlsReaderObject {
     readonly msn: number;
     readonly isClosed: boolean;
 
-    onUpdate?: ((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void);
+    onUpdate?: ((entry: M3U8IndependentSegment, old?: M3U8IndependentSegment) => void) = undefined;
 
     private _entry: M3U8IndependentSegment;
     #closed?: Deferred<true>;
@@ -439,13 +439,9 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
     protected _getUpdateInterval({ index, partTarget }: ParsedPlaylist, updated = false): number {
 
-        let updateInterval = index.target_duration;
+        let updateInterval = index.target_duration!;
         if (this.lowLatency && partTarget! > 0) {
-            updateInterval = partTarget;
-        }
-
-        if (updateInterval === undefined) {
-            updateInterval = Number.NaN;
+            updateInterval = partTarget!;
         }
 
         if (!updated || !index.segments.length) {

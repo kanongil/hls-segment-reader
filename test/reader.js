@@ -13,6 +13,7 @@ const M3U8Parse = require('m3u8parse');
 
 const Shared = require('./_shared');
 const { HlsSegmentReader } = require('..');
+const { AttrList } = require('m3u8parse/lib/attrlist');
 
 
 // Declare internals
@@ -349,6 +350,32 @@ describe('HlsSegmentReader()', () => {
             }
         });
 
+        it('can start with 0 segments', async () => {
+
+            const { reader, state } = prepareLiveReader({}, { segmentCount: 0, index() {
+
+                const index = Shared.genIndex(state);
+                index.type = 'EVENT';
+
+                if (state.segmentCount === 5) {
+                    state.ended = true;
+                }
+                else {
+                    state.segmentCount++;
+                }
+
+                return index;
+            } });
+            const segments = [];
+
+            for await (const obj of reader) {
+                expect(obj.msn).to.equal(segments.length);
+                segments.push(obj);
+            }
+
+            expect(segments).to.have.length(5);
+        });
+
         it('handles sequence number resets', async () => {
 
             const { reader, state } = prepareLiveReader({}, { firstMsn: 10 });
@@ -641,12 +668,16 @@ describe('HlsSegmentReader()', () => {
 
                 reader.on('hint', (hint) => hints.push(hint));
 
+                let updates = 0;
+                const incrUpdates = () => updates++;
+
                 const segments = [];
                 const expected = { parts: state.partIndex, gens: 1 };
                 for await (const obj of reader) {
                     switch (obj.msn) {
                         case 10:
                             expected.parts = 4;
+                            obj.onUpdate = incrUpdates;
                             break;
                         case 11:
                             expected.parts = 1;
@@ -667,6 +698,7 @@ describe('HlsSegmentReader()', () => {
                 expect(segments.length).to.equal(11);
                 expect(segments[0].entry.parts).to.have.length(5);
                 expect(segments[10].entry.parts).to.have.length(3);
+                expect(updates).to.equal(1);
             });
 
             it('updates index outside read()', async () => {
@@ -794,9 +826,45 @@ describe('HlsSegmentReader()', () => {
                     expectedParts = 1;
                 }
 
-                expect(segments.length).to.equal(11);
+                expect(segments).to.have.length(11);
                 expect(segments[0].entry.parts).to.have.length(5);
                 expect(segments[10].entry.parts).to.have.length(3);
+            });
+
+            it('handles weird hint changes (or no change)', async () => {
+
+                const hints = [];
+                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 15, part: 3 } }, (query) => {
+
+                    const index = genLlIndex(query, state);
+
+                    let hint;
+
+                    if (state.partIndex === 1 || state.partIndex === 2) {
+                        hint = new AttrList({ type: 'PART', uri: '"a"' });
+                    }
+                    else if (state.partIndex === 3) {
+                        hint = new AttrList({ type: 'PART', uri: '"a"', 'byterange-start': '0' });
+                    }
+                    else if (state.partIndex === 4) {
+                        hint = new AttrList({ type: 'PART', uri: '"a"', 'byterange-start': '0', 'byterange-length': '10' });
+                    }
+
+                    index.meta.preload_hints = hint ? [hint] : undefined;
+
+                    return index;
+                });
+
+                reader.on('hint', (hint) => hints.push(hint));
+
+                const segments = [];
+                for await (const obj of reader) {
+                    expect(obj.msn).to.equal(segments.length + 10);
+                    segments.push(obj);
+                }
+
+                expect(segments).to.have.length(6);
+                expect(hints).to.have.length(14);
             });
 
             it('handles active parts being evicted from index', async () => {
