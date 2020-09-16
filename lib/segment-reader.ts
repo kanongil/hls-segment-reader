@@ -36,7 +36,11 @@ const internals = {
         'audio/mpegurl'
     ]),
 
-    isSameHint(h1: Hint, h2: Hint): boolean {
+    isSameHint(h1?: Hint, h2?: Hint): boolean {
+
+        if (h1 === undefined || h2 === undefined) {
+            return h1 === h2;
+        }
 
         if (h1.uri !== h2.uri) {
             return false;
@@ -189,13 +193,15 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     ]);
 
     readonly url: URL;
-    baseUrl: string;
     readonly fullStream: boolean;
     readonly lowLatency: boolean;
+    readonly extensions: HlsSegmentReaderOptions['extensions'];
     startDate?: Date;
     stopDate?: Date;
     stallAfterMs: number;
-    readonly extensions: HlsSegmentReaderOptions['extensions'];
+
+    readonly baseUrl: string;
+    readonly modified?: Date;
 
     #next = new SegmentPointer();
     #discont = false;
@@ -234,6 +240,11 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     get index(): MediaPlaylist | MasterPlaylist | undefined {
 
         return this.#index;
+    }
+
+    get hints(): ParsedPlaylist['preloadHints'] {
+
+        return this.#currentHints;
     }
 
     get indexMimeTypes(): Set<string> {
@@ -530,9 +541,9 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
             const hint = hints[type];
             const last = this.#currentHints[type];
 
-            if (hint && (!last || !internals.isSameHint(hint, last))) {
+            if (!internals.isSameHint(hint, last)) {
                 this.#currentHints[type] = hint;
-                process.nextTick(this.emit.bind(this, 'hint', { ...hint, type }));
+                process.nextTick(this.emit.bind(this, 'hint', { ...(hint || {}), type }));
             }
         }
     }
@@ -603,21 +614,26 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
                 assert(!this.destroyed, 'destroyed');
                 this.validateIndexMeta(meta);
-                this.baseUrl = meta.url;
 
                 const rawIndex = await M3U8Parse(stream as Stream, { extensions: this.extensions });
                 assert(!this.destroyed, 'destroyed');
 
+                (this as any).baseUrl = meta.url;
+                (this as any).modified = meta.modified !== null ? new Date(meta.modified) : undefined;
                 this.#index = this._preprocessIndex(rawIndex);
 
                 if (this.#index) {
                     this.#playlist = !this.#index.master ? new ParsedPlaylist(MediaPlaylist.cast(this.#index)) : undefined;
-                    if (this.#playlist?.index.isLive()) {
-                        updated = !fromIndex || this.#playlist.index.ended || !this.#playlist.isSameHead(fromIndex);
+                    if (this.#playlist) {
+                        if (this.#playlist.index.isLive()) {
+                            updated = !fromIndex || !this.#playlist.isSameHead(fromIndex);
+                        }
+
+                        updated ||= this.#playlist.index.ended;
                     }
 
                     if (updated) {
-                        const indexMeta: HlsIndexMeta = { url: meta.url, modified: meta.modified !== null ? new Date(meta.modified) : undefined };
+                        const indexMeta: HlsIndexMeta = { url: meta.url, modified: this.modified };
                         process.nextTick(this.emit.bind(this, 'index', this.#index.master ? new MasterPlaylist(this.#index) : new MediaPlaylist(this.#index), indexMeta));
                     }
 

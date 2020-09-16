@@ -1,5 +1,6 @@
 'use strict';
 
+const Events = require('events');
 const Fs = require('fs');
 const Os = require('os');
 const Path = require('path');
@@ -46,13 +47,18 @@ describe('HlsSegmentReader()', () => {
 
     describe('constructor', () => {
 
-        it('creates a valid object', () => {
+        it('creates a valid object', async () => {
 
             const r = new HlsSegmentReader('http://localhost:' + server.info.port + '/simple/500.m3u8');
+            const closed = Events.once(r, 'close');
 
             expect(r).to.be.instanceOf(HlsSegmentReader);
 
+            await Hoek.wait(10);
+
             r.destroy();
+
+            await closed;
         });
 
         it('throws on missing uri option', () => {
@@ -376,6 +382,22 @@ describe('HlsSegmentReader()', () => {
             expect(segments).to.have.length(5);
         });
 
+        it('emits "close" event when destroyed without consuming', async () => {
+
+            const { reader } = prepareLiveReader();
+
+            const indexEvent = Events.once(reader, 'index');
+            const closeEvent = Events.once(reader, 'close');
+
+            const [index] = await indexEvent;
+            expect(index).to.exist();
+
+            reader.destroy();
+            await closeEvent;
+
+            expect(reader.destroyed).to.be.true();
+        });
+
         it('handles sequence number resets', async () => {
 
             const { reader, state } = prepareLiveReader({}, { firstMsn: 10 });
@@ -690,6 +712,7 @@ describe('HlsSegmentReader()', () => {
                     expect(obj.entry.parts[0].has('byterange')).to.be.false();
                     expect(hints.length).to.equal(expected.gens);
                     expect(state.genCount).to.equal(expected.gens);
+                    expect(reader.hints.part).to.exist();
                     segments.push(obj);
 
                     expected.gens += 5;
@@ -699,6 +722,7 @@ describe('HlsSegmentReader()', () => {
                 expect(segments[0].entry.parts).to.have.length(5);
                 expect(segments[10].entry.parts).to.have.length(3);
                 expect(updates).to.equal(1);
+                expect(reader.hints.part).to.not.exist();
             });
 
             it('updates index outside read()', async () => {
@@ -717,7 +741,7 @@ describe('HlsSegmentReader()', () => {
                             break;
                     }
 
-                    expect(hints.length).to.equal(expected.gens - 1);
+                    expect(hints.length).to.equal(expected.gens);
                     expect(state.genCount).to.equal(expected.gens);
                     segments.push(obj);
                 }
@@ -864,7 +888,7 @@ describe('HlsSegmentReader()', () => {
                 }
 
                 expect(segments).to.have.length(6);
-                expect(hints).to.have.length(14);
+                expect(hints).to.have.length(3 * 6);
             });
 
             it('handles active parts being evicted from index', async () => {
