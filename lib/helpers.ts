@@ -149,6 +149,8 @@ export class ParsedPlaylist {
 
     isSameHead(index: MediaPlaylist, includePartial = false): boolean {
 
+        includePartial &&= !this.index.i_frames_only;
+
         const sameMsn = this.index.lastMsn(includePartial) === index.lastMsn(includePartial);
         if (!sameMsn || !includePartial) {
             return sameMsn;
@@ -161,6 +163,8 @@ export class ParsedPlaylist {
     }
 
     nextHead(includePartial = false): { msn: number; part?: number } {
+
+        includePartial &&= !this.index.i_frames_only;
 
         if (includePartial && this.partTarget) {
             const lastSegment = this.segments.length ? this.segments[this.segments.length - 1] : { uri: undefined, parts: undefined };

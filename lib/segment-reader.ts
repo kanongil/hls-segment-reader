@@ -460,7 +460,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     protected _getUpdateInterval({ index, partTarget }: ParsedPlaylist, updated = false): number {
 
         let updateInterval = index.target_duration!;
-        if (this.lowLatency && partTarget! > 0) {
+        if (this.lowLatency && partTarget! > 0 && !index.i_frames_only) {
             updateInterval = partTarget!;
         }
 
