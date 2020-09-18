@@ -1,5 +1,9 @@
 import type { MediaPlaylist, MediaSegment } from 'm3u8parse';
-export type ReadableStream = NodeJS.ReadableStream & { destroy(err?: Error): void; destroyed: boolean };
+export interface DestroyableStream {
+    destroy(err?: Error): void;
+    destroyed: boolean;
+}
+export type ReadableStream = NodeJS.ReadableStream & DestroyableStream;
 
 import { watch } from 'fs';
 import { basename, dirname } from 'path';
@@ -63,7 +67,7 @@ type FetchOptions = {
     retries?: number;
 };
 
-type PartData = {
+export type PartData = {
     uri: string;
     byterange?: Byterange;
 };

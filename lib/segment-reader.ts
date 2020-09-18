@@ -1,6 +1,5 @@
 import type { Stream } from 'stream';
-import { FetchResult, Deferred } from './helpers';
-
+import type { FetchResult, DestroyableStream, PartData } from './helpers';
 
 import { hrtime } from 'process';
 import { URL } from 'url';
@@ -9,7 +8,7 @@ import { Boom } from '@hapi/boom';
 import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
 import M3U8Parse, { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList, ParserError } from 'm3u8parse';
 
-import { ParsedPlaylist, FsWatcher, performFetch } from './helpers';
+import { Deferred, ParsedPlaylist, FsWatcher, performFetch } from './helpers';
 import { TypedReadable, ReadableEvents } from './raw/typed-readable';
 
 
@@ -183,7 +182,7 @@ interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentReaderEvents> {
+export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentReaderEvents> implements DestroyableStream {
 
     static readonly recoverableCodes = new Set<number>([
         404, // Not Found
