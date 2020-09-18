@@ -174,7 +174,7 @@ export type HlsIndexMeta = {
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
     index: (index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta) => void;
-    hint: (hint: PartData & { type: 'part' | 'map' }) => void;
+    hints: (part: PartData, map: PartData) => void;
     problem: (err: Error) => void;
 }
 
@@ -549,14 +549,9 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         }
 
         const hints = playlist.preloadHints;
-        for (const type of (['map', 'part'] as (keyof ParsedPlaylist['preloadHints'])[])) {
-            const hint = hints[type];
-            const last = this.#currentHints[type];
-
-            if (!internals.isSameHint(hint, last)) {
-                this.#currentHints[type] = hint;
-                process.nextTick(this.emit.bind(this, 'hint', { ...(hint || {}), type }));
-            }
+        if (!internals.isSameHint(hints.part, this.#currentHints.part)) {
+            this.#currentHints = hints;
+            process.nextTick(this.emit.bind(this, 'hints', hints.part, hints.map));
         }
     }
 

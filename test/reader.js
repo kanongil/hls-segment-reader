@@ -688,7 +688,7 @@ describe('HlsSegmentReader()', () => {
                 const hints = [];
                 const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
 
-                reader.on('hint', (hint) => hints.push(hint));
+                reader.on('hints', (part) => hints.push(part));
 
                 let updates = 0;
                 const incrUpdates = () => updates++;
@@ -730,7 +730,7 @@ describe('HlsSegmentReader()', () => {
                 const hints = [];
                 const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 25, part: 3 } }, (query) => genLlIndex(query, state));
 
-                reader.on('hint', (hint) => hints.push(hint));
+                reader.on('hints', (part) => hints.push(part));
 
                 const segments = [];
                 const expected = { parts: state.partIndex, gens: 75 };
@@ -879,7 +879,7 @@ describe('HlsSegmentReader()', () => {
                     return index;
                 });
 
-                reader.on('hint', (hint) => hints.push(hint));
+                reader.on('hints', (part) => hints.push(part));
 
                 const segments = [];
                 for await (const obj of reader) {
