@@ -247,15 +247,9 @@ export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStrea
             if (segment.entry.map) {
                 const uri = segment.entry.map.get('uri', AttrList.Types.String);
                 assert(uri, 'EXT-X-MAP must have URI attribute');
-                let byterange;
+                let byterange: Required<Byterange> | undefined;
                 if (segment.entry.map.has('byterange')) {
-                    // Byterange in map is _not_ byterange encoded - rather it is a quoted string!
-
-                    const [length, offset = '0'] = segment.entry.map.get('byterange', AttrList.Types.String)!.split('@');
-                    byterange = {
-                        offset: parseInt(offset, 10),
-                        length: parseInt(length, 10)
-                    };
+                    byterange = Object.assign({ offset: 0 }, segment.entry.map.get('byterange', AttrList.Types.Byterange)!);
                 }
 
                 // Fetching the map is essential to the processing
