@@ -292,6 +292,33 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
     }
 
     /**
+     * Resolves once there is an index with a different head, than the passed one.
+     *
+     * @param index - Current index to compare against
+     */
+    async waitForUpdate(index?: MediaPlaylist): Promise<undefined> {
+
+        while (!this.destroyed) {
+            if (this.index && !this.#playlist) {
+                throw new Error('Master playlist cannot be updated');
+            }
+
+            if (this.#playlist) {
+                const updated = !index || this.#playlist.index.ended || !this.#playlist.isSameHead(index, this.lowLatency);
+                if (updated) {
+                    return;
+                }
+            }
+
+            // We need to wait
+
+            await this.#nextUpdate;
+        }
+
+        throw new Error('Stream was destroyed');
+    }
+
+    /**
      * Called to push the next segment.
      */
     /*protected*/ async _read(): Promise<void> {
@@ -404,30 +431,15 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         return null;
     }
 
-    /**
-     * Resolves once there is an index with a different head, than the passed one.
-     */
-    private async _waitForUpdate(playlist?: ParsedPlaylist): Promise<ParsedPlaylist | undefined> {
+    private async _waitForUpdate(playlist?: ParsedPlaylist): Promise<ParsedPlaylist> {
 
-        while (!this.destroyed) {
-            if (this.index && !this.#playlist) {
-                throw new Error('Master playlist cannot be updated');
-            }
-
-            if (this.#playlist) {
-                const updated = !playlist || this.#playlist.index.ended || !this.#playlist.isSameHead(playlist.index, this.lowLatency);
-                this._stallCheck(updated);
-                if (updated) {
-                    return this.#playlist;
-                }
-            }
-
-            // We need to wait
-
-            await this.#nextUpdate;
-        }
+        await this.waitForUpdate(playlist?.index);
+        return this.#playlist!;
     }
 
+    /**
+     * Throws if method has not been called with updated === true for options.stallAfterMs
+     */
     private _stallCheck(updated = false): void | never {
 
         if (updated) {
@@ -631,6 +643,8 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
                         updated ||= this.#playlist.index.ended;
                     }
+
+                    this._stallCheck(updated);
 
                     if (updated) {
                         const indexMeta: HlsIndexMeta = { url: meta.url, modified: this.modified };
