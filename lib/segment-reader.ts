@@ -174,6 +174,7 @@ export type HlsIndexMeta = {
 
 interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
     index: (index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta) => void;
+    hint: (hint: PartData & { type: 'part' | 'map' }) => void;
     problem: (err: Error) => void;
 }
 
