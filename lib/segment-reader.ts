@@ -542,16 +542,18 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         return index;
     }
 
-    private _emitHintsNT(playlist?: ParsedPlaylist) {
+    private _updateHints(playlist?: ParsedPlaylist) {
 
-        if (!this.lowLatency || !playlist || !playlist.serverControl.canBlockReload) {
-            return;               // Server does not support blocking
+        if (!this.lowLatency || !playlist) {
+            return;
         }
 
         const hints = playlist.preloadHints;
         if (!internals.isSameHint(hints.part, this.#currentHints.part)) {
             this.#currentHints = hints;
-            process.nextTick(this.emit.bind(this, 'hints', hints.part, hints.map));
+            if (playlist.serverControl.canBlockReload) {
+                process.nextTick(this.emit.bind(this, 'hints', hints.part, hints.map));
+            }
         }
     }
 
@@ -646,7 +648,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                         process.nextTick(this.emit.bind(this, 'index', this.#index.master ? new MasterPlaylist(this.#index) : new MediaPlaylist(this.#index), indexMeta));
                     }
 
-                    this._emitHintsNT(this.#playlist);
+                    this._updateHints(this.#playlist);
 
                     // Delay to allow nexttick emits to be delivered
 
