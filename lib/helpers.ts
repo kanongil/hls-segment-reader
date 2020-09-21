@@ -1,29 +1,14 @@
 import type { MediaPlaylist, MediaSegment } from 'm3u8parse';
-export interface DestroyableStream {
-    destroy(err?: Error): void;
-    destroyed: boolean;
-}
-export type ReadableStream = NodeJS.ReadableStream & DestroyableStream;
+import type { Readable } from 'stream';
+import type { Meta } from 'uristream/lib/uri-reader';
 
 import { watch } from 'fs';
 import { basename, dirname } from 'path';
 import { URL, fileURLToPath } from 'url';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const UriStream = require('uristream') as (uri: string, options: Record<string, unknown>) => ReadableStream;
+import Uristream = require('uristream');
 
 import { AttrList } from 'm3u8parse';
-
-// eslint-disable-next-line @typescript-eslint/no-namespace
-namespace Uristream {
-    export type Meta = {
-        url: string;
-        mime: string;
-        size: number;
-        modified: number | null;
-        etag?: string;
-    };
-}
 
 export type Byterange = {
     offset: number;
@@ -31,8 +16,8 @@ export type Byterange = {
 };
 
 export type FetchResult = {
-    meta: Uristream.Meta;
-    stream?: ReadableStream;
+    meta: Meta;
+    stream?: Readable;
 };
 
 
@@ -89,11 +74,11 @@ export const performFetch = function (uri: URL | string, { byterange, probe = fa
         end: byterange.length !== undefined ? byterange.offset + byterange.length - 1 : undefined
     } : undefined);
 
-    const stream = UriStream(uri.toString(), streamOptions);
+    const stream = Uristream(uri.toString(), streamOptions);
 
     const promise = new Promise<FetchResult>((resolve, reject) => {
 
-        const doFinish = (err: Error | null, meta?: Uristream.Meta) => {
+        const doFinish = (err: Error | null, meta?: Meta) => {
 
             stream.removeListener('meta', onMeta);
             stream.removeListener('end', onFail);
@@ -111,7 +96,7 @@ export const performFetch = function (uri: URL | string, { byterange, probe = fa
             return err ? reject(err) : resolve(result);
         };
 
-        const onMeta = (meta: Uristream.Meta) => {
+        const onMeta = (meta: Meta) => {
 
             meta = Object.assign({}, meta, byterange?.length !== undefined ? { size: byterange.length } : undefined);
 

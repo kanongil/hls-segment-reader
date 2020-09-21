@@ -1,5 +1,5 @@
 import type { Stream } from 'stream';
-import type { FetchResult, DestroyableStream, PartData } from './helpers';
+import type { FetchResult, PartData } from './helpers';
 
 import { hrtime } from 'process';
 import { URL } from 'url';
@@ -183,7 +183,7 @@ interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentReaderEvents> implements DestroyableStream {
+export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentReaderEvents> {
 
     static readonly recoverableCodes = new Set<number>([
         404, // Not Found

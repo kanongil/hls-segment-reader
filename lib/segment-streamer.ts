@@ -1,7 +1,8 @@
 
-import type { HlsSegmentReader, HlsReaderObject, HlsIndexMeta } from './segment-reader';
+import type { Readable } from 'stream';
 import type { MasterPlaylist, MediaPlaylist } from 'm3u8parse';
-import type { FetchResult, Byterange, ReadableStream } from './helpers';
+import type { HlsSegmentReader, HlsReaderObject, HlsIndexMeta } from './segment-reader';
+import type { FetchResult, Byterange } from './helpers';
 
 import { Stream, finished } from 'stream';
 import { URL } from 'url';
@@ -68,14 +69,14 @@ export class HlsStreamerObject {
 
     type: 'segment' | 'map';
     file: FetchResult['meta'];
-    stream?: ReadableStream;
+    stream?: Readable;
     segment?: HlsReaderObject;
     attrs?: AttrList;
 
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'map', details: AttrList);
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment', details: HlsReaderObject);
+    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'map', details: AttrList);
+    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'segment', details: HlsReaderObject);
 
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment' | 'map', details: HlsReaderObject | AttrList) {
+    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'segment' | 'map', details: HlsReaderObject | AttrList) {
 
         const isSegment = type === 'segment';
 
