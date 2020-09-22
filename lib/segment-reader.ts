@@ -5,7 +5,7 @@ import { hrtime } from 'process';
 import { URL } from 'url';
 
 import { Boom } from '@hapi/boom';
-import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
+import { assert as hoekAssert, wait } from '@hapi/hoek';
 import M3U8Parse, { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList, ParserError } from 'm3u8parse';
 
 import { Deferred, ParsedPlaylist, FsWatcher, performFetch } from './helpers';
@@ -340,7 +340,6 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                         }
 
                         if (this.isRecoverableUpdateError(err)) {
-                            this.emit('problem', err);
                             continue;
                         }
                     }
@@ -691,7 +690,10 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 }
 
                 assert(this.#nextUpdate);
-                this.#nextUpdate.catch(ignore);
+                this.#nextUpdate.catch((err) => {
+
+                    this.emit('problem', err);
+                });
             }
         };
 
