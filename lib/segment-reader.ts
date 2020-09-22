@@ -641,8 +641,6 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                         updated ||= this.#playlist.index.ended;
                     }
 
-                    this._stallCheck(updated);
-
                     if (updated) {
                         const indexMeta: HlsIndexMeta = { url: meta.url, modified: this.modified };
                         process.nextTick(this.emit.bind(this, 'index', this.#index.master ? new MasterPlaylist(this.#index) : new MediaPlaylist(this.#index), indexMeta));
@@ -676,6 +674,8 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 }
             }
             finally {
+                this._stallCheck(updated);
+
                 // Assign #nextUpdate
 
                 if (!this.destroyed && this.#index) {
