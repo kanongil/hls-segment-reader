@@ -5,7 +5,7 @@ import { hrtime } from 'process';
 import { URL } from 'url';
 
 import { Boom } from '@hapi/boom';
-import { assert as hoekAssert, wait } from '@hapi/hoek';
+import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
 import M3U8Parse, { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList, ParserError } from 'm3u8parse';
 
 import { Deferred, ParsedPlaylist, FsWatcher, performFetch } from './helpers';
@@ -518,7 +518,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         if (this.index && !this.index.master && this.#rejected < 3) {
             if (MediaPlaylist.cast(index).lastMsn(true) < this.index.lastMsn(true)) {
                 this.#rejected++;
-                this.emit('problem', new Error('Rejected update from the past'));
+                //this.emit('problem', new Error('Rejected update from the past')); // TODO: make recoverable
                 return this.index as T;
             }
 
@@ -680,6 +680,17 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 if (!this.destroyed && this.#index) {
                     if (this.#playlist?.index.isLive()) {
                         this.#nextUpdate = delayedUpdate(this.#playlist, updated, errored || this.#rejected > 1);
+                        this.#nextUpdate.catch((err) => {
+
+                            if (!this.destroyed) {
+                                try {
+                                    this.emit('problem', err);
+                                }
+                                catch (err) {
+                                    this.destroy(err);
+                                }
+                            }
+                        });
                     }
                     else {
                         this.#nextUpdate = Promise.reject(new Error('Index cannot be updated'));
@@ -690,10 +701,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
                 }
 
                 assert(this.#nextUpdate);
-                this.#nextUpdate.catch((err) => {
-
-                    this.emit('problem', err);
-                });
+                this.#nextUpdate.catch(ignore);
             }
         };
 
@@ -702,5 +710,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         }
 
         this.#nextUpdate = performUpdate(createFetch(this.url));
+
+        this.#nextUpdate.catch((err) => this.destroyed || this.destroy(err));
     }
 }
