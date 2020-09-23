@@ -817,7 +817,7 @@ describe('HlsSegmentReader()', () => {
                     const firstMsn = index.media_sequence;
                     let segment;
                     let offset;
-                    for (let msn = firstMsn; msn <= index.lastMsn(); ++msn) {     // eslint-disable-line @hapi/hapi/for-loop
+                    for (let msn = firstMsn; msn <= index.lastMsn(); ++msn) {     // eslint-disable-line @hapi/for-loop
                         segment = index.getSegment(msn);
                         offset = 0;
                         if (segment.parts) {

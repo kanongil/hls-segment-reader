@@ -1,6 +1,6 @@
 'use strict';
 
-const EslintConfigHapi = require('@hapi/eslint-config-hapi');
+const EslintPluginHapi = require('@hapi/eslint-plugin');
 const TypescriptRules = require('@typescript-eslint/eslint-plugin').rules;
 
 
@@ -22,7 +22,7 @@ const tsifyRules = function (from) {
 module.exports = {
     root: true,
     extends: [
-        'plugin:@hapi/hapi/recommended',
+        'plugin:@hapi/recommended',
         'plugin:@typescript-eslint/eslint-recommended'
     ],
     plugins: [
@@ -44,7 +44,7 @@ module.exports = {
             tsconfigRootDir: __dirname
         },
         rules: {
-            ...tsifyRules(EslintConfigHapi.rules),
+            ...tsifyRules(EslintPluginHapi.configs.recommended.rules),
             '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/no-non-null-assertion': 'off',
 

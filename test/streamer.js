@@ -11,7 +11,7 @@ const Uristream = require('uristream');
 
 const Shared = require('./_shared');
 
-// eslint-disable-next-line @hapi/hapi/capitalize-modules
+// eslint-disable-next-line @hapi/capitalize-modules
 const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer } = require('..');
 
 
