@@ -9,8 +9,9 @@ import { URL } from 'url';
 
 import { assert as hoekAssert } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse';
+import { Transform } from 'readable-stream';
 
-import { TypedTransform, DuplexEvents } from './raw/typed-readable';
+import { DuplexEvents, TypedEmitter, TypedTransform } from './raw/typed-readable';
 import { SegmentDownloader } from './segment-downloader';
 
 import { types as MimeTypes } from 'mime-types';
@@ -98,12 +99,15 @@ export type HlsSegmentStreamerOptions = {
     highWaterMark?: number;
 };
 
-interface HlsSegmentStreamerEvents extends DuplexEvents<HlsStreamerObject> {
-    index: (index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta) => void;
-    problem: (err: Error) => void;
+const HlsReaderObjectType = <HlsReaderObject>(null as any);
+const HlsStreamerObjectType = <HlsStreamerObject>(null as any);
+const HlsSegmentStreamerEvents = <IHlsSegmentStreamerEvents & DuplexEvents<HlsStreamerObject>>(null as any);
+interface IHlsSegmentStreamerEvents {
+    index(index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta): void;
+    problem(err: Error): void;
 }
 
-export class HlsSegmentStreamer extends TypedTransform<HlsReaderObject, HlsStreamerObject, HlsSegmentStreamerEvents> {
+export class HlsSegmentStreamer extends TypedTransform(HlsReaderObjectType, HlsStreamerObjectType, TypedEmitter(HlsSegmentStreamerEvents, Transform)) {
 
     baseUrl = 'unknown:';
     readonly withData: boolean;

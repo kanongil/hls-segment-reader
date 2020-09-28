@@ -7,9 +7,10 @@ import { URL } from 'url';
 import { Boom } from '@hapi/boom';
 import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
 import M3U8Parse, { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList, ParserError } from 'm3u8parse';
+import { Readable } from 'readable-stream';
 
 import { Deferred, ParsedPlaylist, FsWatcher, performFetch } from './helpers';
-import { TypedReadable, ReadableEvents } from './raw/typed-readable';
+import { TypedReadable, ReadableEvents, TypedEmitter } from './raw/typed-readable';
 
 
 // eslint-disable-next-line func-style
@@ -172,18 +173,19 @@ export type HlsIndexMeta = {
     modified?: Date;
 };
 
-interface HlsSegmentReaderEvents extends ReadableEvents<HlsReaderObject> {
-    index: (index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta) => void;
-    hints: (part: PartData, map: PartData) => void;
-    problem: (err: Error) => void;
+const HlsReaderObjectType = <HlsReaderObject>(null as any);
+const HlsSegmentReaderEvents = <IHlsSegmentReaderEvents & ReadableEvents<HlsReaderObject>>(null as any);
+interface IHlsSegmentReaderEvents {
+    index(index: MediaPlaylist | MasterPlaylist, meta: HlsIndexMeta): void;
+    hints(part: PartData, map: PartData): void;
+    problem(err: Error): void;
 }
-
 
 /**
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentReaderEvents> {
+export class HlsSegmentReader extends TypedReadable(HlsReaderObjectType, TypedEmitter(HlsSegmentReaderEvents, Readable)) {
 
     static readonly recoverableCodes = new Set<number>([
         404, // Not Found
@@ -551,7 +553,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
         if (!internals.isSameHint(hints.part, this.#currentHints.part)) {
             this.#currentHints = hints;
             if (playlist.serverControl.canBlockReload) {
-                process.nextTick(this.emit.bind(this, 'hints', hints.part, hints.map));
+                process.nextTick(this.emit.bind(this, 'hints' as any, hints.part, hints.map));
             }
         }
     }
@@ -642,7 +644,7 @@ export class HlsSegmentReader extends TypedReadable<HlsReaderObject, HlsSegmentR
 
                     if (updated) {
                         const indexMeta: HlsIndexMeta = { url: meta.url, modified: this.modified };
-                        process.nextTick(this.emit.bind(this, 'index', this.#index.master ? new MasterPlaylist(this.#index) : new MediaPlaylist(this.#index), indexMeta));
+                        process.nextTick(this.emit.bind(this, 'index' as any, this.#index.master ? new MasterPlaylist(this.#index) : new MediaPlaylist(this.#index), indexMeta));
                     }
 
                     this._updateHints(this.#playlist);
