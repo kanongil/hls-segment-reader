@@ -26,7 +26,7 @@ export interface WritableEvents extends BaseEvents {
 export interface DuplexEvents<T> extends ReadableEvents<T>, WritableEvents {}
 
 type ListenerSignature<L> = {
-    [E in keyof L]: (...args: any[]) => any;
+    [E in keyof L]: (...args: any[]) => void;
 };
 
 // eslint-disable-next-line @typescript-eslint/ban-types
