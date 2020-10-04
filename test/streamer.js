@@ -12,7 +12,7 @@ const Uristream = require('uristream');
 const Shared = require('./_shared');
 
 // eslint-disable-next-line @hapi/capitalize-modules
-const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer } = require('..');
+const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer, HlsPlaylistReader } = require('..');
 
 
 // Declare internals
@@ -335,25 +335,9 @@ describe('HlsSegmentStreamer()', () => {
 
         it('does not output any segments', async () => {
 
-            const segments = await readSegments(new HlsSegmentReader(`http://localhost:${server.info.port}/simple/index.m3u8`));
-            expect(segments.length).to.equal(0);
-        });
-
-        it('emits "index" event', async () => {
-
-            const promise = readSegments(new HlsSegmentReader(`http://localhost:${server.info.port}/simple/index.m3u8`));
-
-            let remoteIndex;
-            promise.reader.on('index', (index) => {
-
-                remoteIndex = index;
-            });
-
-            await promise;
-
-            expect(remoteIndex).to.exist();
-            expect(remoteIndex.master).to.be.true();
-            expect(remoteIndex.variants[0].uri).to.exist();
+            const reader = new HlsSegmentReader(`http://localhost:${server.info.port}/simple/index.m3u8`);
+            await expect(readSegments(reader)).to.reject('The reader source is a master playlist');
+            expect(reader.index.master).to.be.true();
         });
     });
 
@@ -509,10 +493,10 @@ describe('HlsSegmentStreamer()', () => {
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, readerOptions);
             const streamer = new HlsSegmentStreamer(reader, { fullStream: false, withData: true, ...readerOptions });
 
-            reader._intervals = [];
-            reader._getUpdateInterval = function (updated) {
+            reader.reader._intervals = [];
+            reader.reader._getUpdateInterval = function (updated) {
 
-                this._intervals.push(HlsSegmentReader.prototype._getUpdateInterval.call(this, updated));
+                this._intervals.push(HlsPlaylistReader.prototype._getUpdateInterval.call(this, updated));
                 return undefined;
             };
 

@@ -13,7 +13,7 @@ const Lab = require('@hapi/lab');
 const M3U8Parse = require('m3u8parse');
 
 const Shared = require('./_shared');
-const { HlsSegmentReader } = require('..');
+const { HlsSegmentReader, HlsPlaylistReader } = require('..');
 const { AttrList } = require('m3u8parse/lib/attrlist');
 
 
@@ -125,7 +125,7 @@ describe('HlsSegmentReader()', () => {
             const promise = readSegments(`http://localhost:${server.info.port}/simple/index.m3u8`);
 
             let remoteIndex;
-            promise.reader.on('index', (index) => {
+            promise.reader.reader.on('index', (index) => {
 
                 remoteIndex = index;
             });
@@ -150,7 +150,7 @@ describe('HlsSegmentReader()', () => {
             }
         });
 
-        it('emits the "index" event before starting', async () => {
+/*        it('emits the "index" event before starting', async () => {
 
             const promise = readSegments(`http://localhost:${server.info.port}/simple/500.m3u8`);
 
@@ -171,7 +171,7 @@ describe('HlsSegmentReader()', () => {
             await promise;
 
             expect(hasSegment).to.be.true();
-        });
+        });*/
 
         it('supports the startDate option', async () => {
 
@@ -270,10 +270,10 @@ describe('HlsSegmentReader()', () => {
         const prepareLiveReader = function (readerOptions = {}, state = {}) {
 
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
-            reader._intervals = [];
-            reader._getUpdateInterval = function (updated) {
+            reader.reader._intervals = [];
+            reader.reader._getUpdateInterval = function (updated) {
 
-                this._intervals.push(HlsSegmentReader.prototype._getUpdateInterval.call(this, updated));
+                this._intervals.push(HlsPlaylistReader.prototype._getUpdateInterval.call(this, updated));
                 return undefined;
             };
 
@@ -386,11 +386,10 @@ describe('HlsSegmentReader()', () => {
 
             const { reader } = prepareLiveReader();
 
-            const indexEvent = Events.once(reader, 'index');
             const closeEvent = Events.once(reader, 'close');
 
-            const [index] = await indexEvent;
-            expect(index).to.exist();
+            const playlist = await reader.reader.waitForUpdate();
+            expect(playlist).to.exist();
 
             reader.destroy();
             await closeEvent;
@@ -607,6 +606,7 @@ describe('HlsSegmentReader()', () => {
             });
         });
 
+        // TODO: move
         describe('isRecoverableUpdateError()', () => {
 
             it('is called on index update errors', async () => {
@@ -642,10 +642,10 @@ describe('HlsSegmentReader()', () => {
                 });
 
                 const errors = [];
-                reader.isRecoverableUpdateError = function (err) {
+                reader.reader.isRecoverableUpdateError = function (err) {
 
                     errors.push(err);
-                    return HlsSegmentReader.prototype.isRecoverableUpdateError.call(reader, err);
+                    return HlsPlaylistReader.prototype.isRecoverableUpdateError.call(reader, err);
                 };
 
                 const segments = [];
@@ -685,10 +685,7 @@ describe('HlsSegmentReader()', () => {
 
             it('handles a basic stream', async () => {
 
-                const hints = [];
                 const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
-
-                reader.on('hints', (part) => hints.push(part));
 
                 let updates = 0;
                 const incrUpdates = () => updates++;
@@ -710,7 +707,6 @@ describe('HlsSegmentReader()', () => {
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expected.parts);
                     expect(obj.entry.parts[0].has('byterange')).to.be.false();
-                    expect(hints.length).to.equal(expected.gens);
                     expect(state.genCount).to.equal(expected.gens);
                     expect(reader.hints.part).to.exist();
                     segments.push(obj);
@@ -727,10 +723,7 @@ describe('HlsSegmentReader()', () => {
 
             it('updates index outside read()', async () => {
 
-                const hints = [];
                 const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 25, part: 3 } }, (query) => genLlIndex(query, state));
-
-                reader.on('hints', (part) => hints.push(part));
 
                 const segments = [];
                 const expected = { parts: state.partIndex, gens: 75 };
@@ -741,7 +734,6 @@ describe('HlsSegmentReader()', () => {
                             break;
                     }
 
-                    expect(hints.length).to.equal(expected.gens);
                     expect(state.genCount).to.equal(expected.gens);
                     segments.push(obj);
                 }
@@ -806,6 +798,7 @@ describe('HlsSegmentReader()', () => {
 
                 expect(segments.length).to.equal(12);
                 expect(segments[0].entry.parts).to.have.length(5);
+                expect(segments[11].isClosed).to.be.true();
                 expect(segments[11].entry.parts).to.have.length(3);
             });
 
@@ -879,7 +872,14 @@ describe('HlsSegmentReader()', () => {
                     return index;
                 });
 
-                reader.on('hints', (part) => hints.push(part));
+                let last = reader.hints;
+                reader.reader.on('playlist', () => {
+
+                    if (reader.hints !== last) {
+                        hints.push(reader.hints);
+                        last = reader.hints;
+                    }
+                });
 
                 const segments = [];
                 for await (const obj of reader) {

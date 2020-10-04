@@ -1,4 +1,3 @@
-import type { MediaPlaylist, MediaSegment } from 'm3u8parse';
 import type { Readable } from 'stream';
 import type { Meta } from 'uristream/lib/uri-reader';
 
@@ -8,7 +7,6 @@ import { URL, fileURLToPath } from 'url';
 
 import Uristream = require('uristream');
 
-import { AttrList } from 'm3u8parse';
 
 export type Byterange = {
     offset: number;
@@ -52,15 +50,6 @@ type FetchOptions = {
     retries?: number;
 };
 
-export type PartData = {
-    uri: string;
-    byterange?: Byterange;
-};
-
-type PreloadHints = {
-    part?: PartData;
-    map?: PartData;
-};
 
 export const performFetch = function (uri: URL | string, { byterange, probe = false, timeout, retries = 1 }: FetchOptions = {}): AbortablePromise<FetchResult> {
 
@@ -121,91 +110,6 @@ export const performFetch = function (uri: URL | string, { byterange, probe = fa
 
     return promise;
 };
-
-
-export class ParsedPlaylist {
-
-    index: MediaPlaylist;
-
-    constructor(index: MediaPlaylist) {
-
-        this.index = index;
-    }
-
-    isSameHead(index: MediaPlaylist, includePartial = false): boolean {
-
-        includePartial &&= !this.index.i_frames_only;
-
-        const sameMsn = this.index.lastMsn(includePartial) === index.lastMsn(includePartial);
-        if (!sameMsn || !includePartial) {
-            return sameMsn;
-        }
-
-        // Same + partial check
-
-        return ((this.segments[this.segments.length - 1].parts || []).length ===
-                (index.segments[index.segments.length - 1].parts || []).length);
-    }
-
-    nextHead(includePartial = false): { msn: number; part?: number } {
-
-        includePartial &&= !this.index.i_frames_only;
-
-        if (includePartial && this.partTarget) {
-            const lastSegment = this.segments.length ? this.segments[this.segments.length - 1] : { uri: undefined, parts: undefined };
-            const hasPartialSegment = !lastSegment.uri;
-            const parts = lastSegment.parts || [];
-
-            return {
-                msn: this.index.lastMsn(true) + +!hasPartialSegment,
-                part: hasPartialSegment ? parts.length : 0
-            };
-        }
-
-        return { msn: this.index.lastMsn(false) + 1 };
-    }
-
-    get segments(): MediaSegment[] {
-
-        return this.index.segments;
-    }
-
-    get partTarget(): number | undefined {
-
-        const info = this.index.part_info;
-        return info ? info.get('part-target', AttrList.Types.Float) || undefined : undefined;
-    }
-
-    get serverControl(): { canBlockReload: boolean; partHoldBack?: number } {
-
-        const control = this.index.server_control;
-        return {
-            canBlockReload: control ? control.get('can-block-reload') === 'YES' : false,
-            partHoldBack: control ? control.get('part-hold-back', AttrList.Types.Float) || undefined : undefined
-        };
-    }
-
-    get preloadHints(): PreloadHints {
-
-        const hints: PreloadHints = {};
-
-        const list = this.index.meta.preload_hints;
-        for (const attrs of list || []) {
-            const type = attrs.get('type')?.toLowerCase();
-            if (attrs.has('uri') && type === 'part' || type === 'map') {
-                hints[type] = {
-                    uri: attrs.get('uri', AttrList.Types.String) || '',
-                    byterange: attrs.has('byterange-start') ? {
-                        offset: attrs.get('byterange-start', AttrList.Types.Int),
-                        length: (attrs.has('byterange-length') ? attrs.get('byterange-length', AttrList.Types.Int) : undefined)
-                    } : undefined
-                };
-            }
-        }
-
-        return hints;
-    }
-}
 
 
 type FSWatcherEvents = 'rename' | 'change';
