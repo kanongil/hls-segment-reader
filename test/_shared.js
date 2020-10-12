@@ -40,7 +40,7 @@ exports.provisionServer = () => {
             slowStream.push(null);
         }, 200);
 
-        return h.response(slowStream).type('video/mp2t');
+        return h.response(slowStream).type('video/mp2t').header('content-length', buffer.byteLength);
     };
 
     server.route({ method: 'GET', path: '/simple/{path*}', handler: { directory: { path: '.' } } });
@@ -190,10 +190,12 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
 
         // Add hint
 
-        meta.preload_hints = [new M3U8Parse.AttrList({
-            type: 'part',
-            uri: `"${firstMsn + segmentCount}-part${partIndex}.ts"`
-        })];
+        if (!ended) {
+            meta.preload_hints = [new M3U8Parse.AttrList({
+                type: 'part',
+                uri: `"${firstMsn + segmentCount}-part${partIndex}.ts"`
+            })];
+        }
     }
 
     const index = new M3U8Parse.MediaPlaylist({
@@ -205,7 +207,7 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
         ended
     });
 
-    //console.log('GEN', index.startMsn(true), index.lastMsn(true), index.meta.preload_hints);
+    //console.log('GEN', index.startMsn(true), index.lastMsn(true), index.meta.preload_hints, index.ended);
 
     return index;
 };

@@ -40,7 +40,7 @@ internals.nextValue = async function (iter, expectDone = false) {
 // Test shortcuts
 
 const lab = exports.lab = Lab.script();
-const { after, afterEach, before, beforeEach, describe, it } = lab;
+const { after, before, describe, it } = lab;
 const { expect } = Code;
 
 
@@ -493,8 +493,8 @@ describe('HlsSegmentStreamer()', () => {
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, readerOptions);
             const streamer = new HlsSegmentStreamer(reader, { fullStream: false, withData: true, ...readerOptions });
 
-            reader.reader._intervals = [];
-            reader.reader._getUpdateInterval = function (updated) {
+            reader.feeder._intervals = [];
+            reader.feeder._getUpdateInterval = function (updated) {
 
                 this._intervals.push(HlsPlaylistReader.prototype._getUpdateInterval.call(this, updated));
                 return undefined;
@@ -505,13 +505,13 @@ describe('HlsSegmentStreamer()', () => {
             return { reader: streamer, state: serverState.state };
         };
 
-        beforeEach(() => {
+        before(() => {
 
             liveServer = Shared.provisionLiveServer(serverState);
             return liveServer.start();
         });
 
-        afterEach(() => {
+        after(() => {
 
             return liveServer.stop();
         });
@@ -527,9 +527,9 @@ describe('HlsSegmentStreamer()', () => {
 
                 if (obj.segment.msn > 5) {
                     state.firstMsn++;
-                    if (state.firstMsn === 5) {
+                    if (state.firstMsn >= 5) {
+                        state.firstMsn = 5;
                         state.ended = true;
-                        await Hoek.wait(50);
                     }
                 }
             }
@@ -580,28 +580,33 @@ describe('HlsSegmentStreamer()', () => {
 
         it('handles sequence number jumps', async () => {
 
-            const { reader, state } = prepareLiveReader();
-            const segments = [];
             let skipped = false;
+            const { reader, state } = prepareLiveReader({}, {
+                index() {
 
+                    const index = Shared.genIndex(state);
+
+                    if (!skipped) {
+                        ++state.firstMsn;
+                        if (state.firstMsn === 5) {
+                            state.firstMsn = 50;
+                            skipped = true;
+                        }
+                    }
+                    else if (skipped) {
+                        ++state.firstMsn;
+                        if (state.firstMsn === 55) {
+                            state.ended = true;
+                        }
+                    }
+
+                    return index;
+                }
+            });
+
+            const segments = [];
             for await (const obj of reader) {
                 segments.push(obj);
-
-                if (!skipped && obj.segment.msn >= state.segmentCount - 1) {
-                    state.firstMsn++;
-                    if (state.firstMsn === 5) {
-                        state.firstMsn = 50;
-                        skipped = true;
-                    }
-                }
-
-                if (skipped && obj.segment.msn > 55) {
-                    state.firstMsn++;
-                    if (state.firstMsn === 55) {
-                        state.ended = true;
-                        await Hoek.wait(50);
-                    }
-                }
             }
 
             expect(segments.length).to.equal(23);
@@ -665,11 +670,10 @@ describe('HlsSegmentStreamer()', () => {
                 segments.push(obj);
 
                 state.firstMsn++;
-                if (state.firstMsn === 3) {
+                if (state.firstMsn >= 3) {
+                    state.firstMsn = 3;
                     state.ended = true;
                 }
-
-                await Hoek.wait(50);
             }
 
             expect(segments.length).to.equal(13);
@@ -696,9 +700,9 @@ describe('HlsSegmentStreamer()', () => {
 
                 if (obj.segment.msn > 5) {
                     state.firstMsn++;
-                    if (state.firstMsn === 5) {
+                    if (state.firstMsn >= 5) {
+                        state.firstMsn = 5;
                         state.ended = true;
-                        await Hoek.wait(50);
                     }
                 }
             }

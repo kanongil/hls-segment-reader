@@ -1,5 +1,5 @@
 import type { EventEmitter } from 'events';
-import type { Readable, Transform/*, Writable*/ } from 'readable-stream';
+import type { Duplex, Readable, Transform/*, Writable*/ } from 'readable-stream';
 
 
 export interface BaseEvents {
@@ -75,6 +75,12 @@ interface ITypedWritable<T> {
 } & TBase;*/
 
 interface ITypedDuplex<W, R> extends ITypedReadable<R>, ITypedWritable<W> {}
+
+export declare function TypedDuplex<W = Buffer, R = Buffer, TBase extends Constructor = typeof Duplex>(write?: W, read?: R, Base?: TBase): {
+    new(...args: any[]): ITypedDuplex<W, R> & {
+        _transform(chunk: W, encoding: BufferEncoding, callback: (error?: Error, data?: any) => void): void;
+    };
+} & TBase;
 
 export declare function TypedTransform<W = Buffer, R = Buffer, TBase extends Constructor = typeof Transform>(write?: W, read?: R, Base?: TBase): {
     new(...args: any[]): ITypedDuplex<W, R> & {

@@ -1,7 +1,6 @@
 
 import type { Readable } from 'stream';
 import type { MasterPlaylist, MediaPlaylist } from 'm3u8parse';
-import type { HlsIndexMeta, ParsedPlaylist } from './playlist-reader';
 import type { HlsSegmentReader, HlsReaderObject } from './segment-reader';
 import type { FetchResult, Byterange } from './helpers';
 
@@ -127,7 +126,6 @@ export class HlsSegmentStreamer extends TypedTransform(HlsReaderObjectType, HlsS
     #downloader: SegmentDownloader;
     #reader?: HlsSegmentReader;
 
-    #onPlaylistUpdate = this._onPlaylistUpdate.bind(this);
     #onReaderIndex = this._onReaderIndex.bind(this);
     #onReaderProblem = this._onReaderProblem.bind(this);
 
@@ -147,25 +145,23 @@ export class HlsSegmentStreamer extends TypedTransform(HlsReaderObjectType, HlsS
         this.on('pipe', (src: HlsSegmentReader) => {
 
             assert(!this.#reader, 'Only one piped source is supported');
-            assert(!src.reader.index?.master, 'Source cannot be based on a master playlist');
+            assert(!src.feeder.index?.master, 'Source cannot be based on a master playlist');
 
             this.#reader = src;
-            src.reader.on<'playlist'>('playlist', this.#onPlaylistUpdate);
-            src.reader.on<'problem'>('problem', this.#onReaderProblem);
+            src.on<'index'>('index', this.#onReaderIndex);
+            src.on<'problem'>('problem', this.#onReaderProblem);
 
-            if (src.reader.playlist) {
-                process.nextTick(this._onPlaylistUpdate.bind(this, src.reader.playlist, { url: src.reader.baseUrl, modified: src.reader.modified }));
+            if (src.index) {
+                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.feeder.baseUrl }));
             }
-            else {
-                src.reader.on<'index'>('index', this.#onReaderIndex);
-            }
+
+            this.baseUrl = src.feeder.baseUrl;
         });
 
         this.on('unpipe', () => {
 
-            this.#reader?.reader.off<'playlist'>('playlist', this.#onPlaylistUpdate);
-            this.#reader?.reader.off<'index'>('index', this.#onReaderIndex);
-            this.#reader?.reader.off<'problem'>('problem', this.#onReaderProblem);
+            this.#reader?.off<'index'>('index', this.#onReaderIndex);
+            this.#reader?.off<'problem'>('problem', this.#onReaderProblem);
             this.#reader = undefined;
         });
 
@@ -232,32 +228,21 @@ export class HlsSegmentStreamer extends TypedTransform(HlsReaderObjectType, HlsS
         });
     }
 
-    // Override to only destroy once
-
-    destroy(err?: Error): this {
-
-        if (!this.destroyed) {
-            return super.destroy(err);
-        }
-
-        return this;
-    }
-
     // Private methods
 
-    protected _onPlaylistUpdate(playlist: ParsedPlaylist, meta: HlsIndexMeta): void {
+    protected _onReaderIndex(index: Readonly<MediaPlaylist | MasterPlaylist>, { url }: { url: string }): void {
 
-        this.baseUrl = meta.url;
+        if (index.master) {
+            this.destroy(new Error('The reader source is a master playlist'));
+            return;
+        }
+
+        this.baseUrl = url;
 
         // Update active token list
 
-        this._updateTokens(playlist.index);
+        this._updateTokens(index);
         this.#downloader.setValid(this.#readState.activeTokens);
-    }
-
-    protected _onReaderIndex(index: MasterPlaylist): void {
-
-        this.destroy(new Error('The reader source is a master playlist'));
     }
 
     protected _onReaderProblem(err: Error): void {

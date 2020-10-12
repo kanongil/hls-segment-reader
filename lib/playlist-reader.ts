@@ -1,16 +1,15 @@
 import type { FetchResult } from './helpers';
 
 import { hrtime } from 'process';
-import { finished, Stream } from 'stream';
+import { Stream } from 'stream';
 import { URL } from 'url';
-import { promisify } from 'util';
 
 import { Boom } from '@hapi/boom';
-import { assert as hoekAssert, ignore, wait } from '@hapi/hoek';
+import { assert as hoekAssert, wait } from '@hapi/hoek';
 import M3U8Parse, { AttrList, MediaPlaylist, MediaSegment, MasterPlaylist, ParserError } from 'm3u8parse';
 
 import { Byterange, FsWatcher, performFetch } from './helpers';
-import { BaseEvents, TypedEmitter } from './raw/typed-readable';
+import { BaseEvents, TypedEmitter, TypedReadable } from './raw/typed-readable';
 
 
 // eslint-disable-next-line func-style
@@ -35,6 +34,7 @@ const internals = {
         'application/x-mpegurl',
         'audio/mpegurl'
     ]),
+    emptyHints: Object.freeze({ part: undefined, map: undefined }),
 
     isSameHint(h1?: Hint, h2?: Hint): boolean {
 
@@ -170,16 +170,20 @@ export class ParsedPlaylist {
     }
 }
 
-
 export type HlsIndexMeta = {
     url: string;
+    updated: Date;
     modified?: Date;
 };
 
+export interface PlaylistReaderObject {
+    index: Readonly<MasterPlaylist | MediaPlaylist>;
+    playlist?: ParsedPlaylist;
+    meta: Readonly<HlsIndexMeta>;
+}
+
 const HlsPlaylistReaderEvents = <IHlsPlaylistReaderEvents & BaseEvents>(null as any);
 interface IHlsPlaylistReaderEvents {
-    index(index: Readonly<MasterPlaylist>, meta: Readonly<HlsIndexMeta>): void;
-    playlist(index: ParsedPlaylist, meta: Readonly<HlsIndexMeta>): void;
     problem(err: Readonly<Error>): void;
 }
 
@@ -187,7 +191,7 @@ interface IHlsPlaylistReaderEvents {
  * Reads an HLS media playlist, and emits updates.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
+export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents, TypedReadable<Readonly<PlaylistReaderObject>>()) {
 
     static readonly recoverableCodes = new Set<number>([
         404, // Not Found
@@ -197,26 +201,26 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
     ]);
 
     readonly url: URL;
-    readonly lowLatency: boolean;
+    lowLatency: boolean;
     readonly extensions: HlsPlaylistReaderOptions['extensions'];
     stallAfterMs: number;
 
     readonly baseUrl: string;
     readonly modified?: Date;
-    destroyed = false;
+    readonly updated?: Date;
+    processing = false;
 
     #rejected = 0;
     #indexStalledAt: bigint | null = null;
     #index?: MediaPlaylist | MasterPlaylist;
     #playlist?: ParsedPlaylist;
-    #currentHints: ParsedPlaylist['preloadHints'] = {};
-    #nextUpdate?: Promise<void>;
+    #currentHints: ParsedPlaylist['preloadHints'] = internals.emptyHints;
     #fetch?: ReturnType<typeof performFetch>;
     #watcher?: FsWatcher;
 
     constructor(src: string, options: HlsPlaylistReaderOptions = {}) {
 
-        super();
+        super({ objectMode: true, highWaterMark: 0 });
 
         this.url = new URL(src);
         this.baseUrl = src;
@@ -227,7 +231,7 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
 
         this.extensions = options.extensions ?? {};
 
-        this._keepIndexUpdated();
+        this._start();
     }
 
     get index(): Readonly<MediaPlaylist | MasterPlaylist> | undefined {
@@ -294,40 +298,14 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
         return !this.index || this.index.isLive();
     }
 
-    /**
-     * Resolves once there is an index with a different head, than the passed one.
-     *
-     * @param index - Current index to compare against
-     */
-    async waitForUpdate(index?: Readonly<MediaPlaylist>): Promise<ParsedPlaylist> {
+    /*protected*/ _read(): void {
 
-        while (!this.destroyed) {
-            if (this.index && !this.#playlist) {
-                throw new Error('Master playlist cannot be updated');
-            }
-
-            if (this.#playlist) {
-                const updated = !index || this.#playlist.index.ended || !this.#playlist.isSameHead(index, this.lowLatency);
-                if (updated) {
-                    return this.#playlist;
-                }
-            }
-
-            // We need to wait
-
-            await this.#nextUpdate;
+        if (!this.processing && this.canUpdate()) {
+            this._startUpdate();
         }
-
-        throw new Error('Stream was destroyed');
     }
 
-    destroy(err?: Error | null): void {
-
-        if (this.destroyed) {
-            return;
-        }
-
-        this.destroyed = true;
+    _destroy(err: Error | null, cb: unknown): void {
 
         if (this.#fetch) {
             this.#fetch.abort();
@@ -338,9 +316,7 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
             this.#watcher = undefined;
         }
 
-        if (err) {
-            this.emit<'error'>('error', err);
-        }
+        return super._destroy(err, cb as any);
     }
 
     // Private methods
@@ -397,11 +373,8 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
 
     private _updateHints(playlist: ParsedPlaylist): boolean {
 
-        if (!this.lowLatency) {
-            return false;
-        }
+        const hints = this.lowLatency ? playlist.preloadHints : internals.emptyHints;
 
-        const hints = playlist.preloadHints;
         if (internals.isSameHint(hints.part, this.#currentHints.part)) {
             return false;
         }
@@ -410,24 +383,24 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
         return true;
     }
 
-    private _emitUpdateNextTick(meta: HlsIndexMeta) {
+    private _pushUpdate(meta: HlsIndexMeta): boolean {
 
-        process.nextTick(() => {
+        assert(!this._readableState.ended);
+        assert(this.index, 'Missing index');
 
-            assert(this.index);
+        this.push({ index: this.index, playlist: this.#playlist, meta });
 
-            if (this.index.master) {
-                this.emit<'index'>('index', this.index, meta);
-            }
-            else {
-                this.emit<'playlist'>('playlist', this.#playlist!, meta);
-            }
-        });
+        return false; // Always stall
     }
 
     private _updateErrorHandler(err: Error): void {
 
         if (!this.destroyed) {
+            if (!this.isRecoverableUpdateError(err)) {
+                this.destroy(err);
+                return;
+            }
+
             try {
                 this.emit<'problem'>('problem', err);
             }
@@ -439,26 +412,12 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
 
     private _createFetch(url: URL): ReturnType<typeof performFetch> {
 
-        assert(!this.#fetch);
+        assert(!this.#fetch, 'Already fetching');
 
-        this.#fetch = performFetch(url, { timeout: 30 * 1000 });
-
-        // Clear this.#fetch when done
-
-        this.#fetch
-            .then(({ stream }) => promisify(finished)(stream!))
-            .catch(ignore)
-            .finally(() => (this.#fetch = undefined));
-
-        return this.#fetch;
+        return (this.#fetch = performFetch(url, { timeout: 30 * 1000 }));
     }
 
-    /**
-     * Call once to fetch index and start update loop (if needed).
-     */
-    private _keepIndexUpdated() {
-
-        assert(!this.#nextUpdate, 'Already called');
+    private _start() {
 
         // Prepare watcher in case it is needed
 
@@ -466,13 +425,17 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
             this.#watcher = new FsWatcher(this.url);
         }
 
-        // Create initial fetch, and start update loop
+        this.processing = true;
+        this._performUpdate(this._createFetch(this.url)).catch(this.destroy.bind(this));
+    }
 
-        this.#nextUpdate = this._performUpdate(this._createFetch(this.url));
+    private _startUpdate(wasUpdated = true, wasError = false) {
 
-        // If the initial fetch fails, hard error
+        assert(this.#playlist, 'Missing playlist');
+        assert(!this.destroyed, 'destroyed');
 
-        this.#nextUpdate.catch(this.destroy.bind(this));
+        this.processing = true;
+        this._delayedUpdate(this.#playlist, wasUpdated, wasError).catch(this._updateErrorHandler.bind(this));
     }
 
     /**
@@ -482,9 +445,11 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
 
         let updated = !fromIndex;
         let errored = false;
+        let more = true;
         try {
             // eslint-disable-next-line no-var
             var { meta, stream } = await fetchPromise;
+            (this as any).updated = new Date();
 
             assert(!this.destroyed, 'destroyed');
             this.validateIndexMeta(meta);
@@ -496,23 +461,24 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
             (this as any).modified = meta.modified !== null ? new Date(meta.modified) : undefined;
             this.#index = this._preprocessIndex(rawIndex);
 
-            if (this.index) {
-                updated ||= !this.canUpdate();      // If there are no more updates, then we need to signal the index
+            assert(this.index, 'Missing index');
 
-                this.#playlist = !this.index.master ? new ParsedPlaylist(this.index) : undefined;
-                if (this.#playlist) {
-                    if (fromIndex && this.canUpdate()) {
-                        updated ||= !this.#playlist.isSameHead(fromIndex);
-                    }
+            updated ||= !this.canUpdate();      // If there are no more updates, then we always need to push the index
 
-                    updated = this._updateHints(this.#playlist) || updated; // No ||= since the update has a side-effect, and will not be called if updated is already set
+            this.#playlist = !this.index.master ? new ParsedPlaylist(this.index) : undefined;
+            if (this.#playlist) {
+                if (fromIndex && this.canUpdate()) {
+                    updated ||= !this.#playlist.isSameHead(fromIndex);
                 }
 
-                if (updated) {
-                    this._emitUpdateNextTick({ url: meta.url, modified: this.modified });
+                updated = this._updateHints(this.#playlist) || updated; // No ||= since the update has a side-effect, and will not be called if updated is already set
+            }
 
-                    await wait(0);      // wait until nexttick emit has been resolved
-                }
+            more = !updated || this._pushUpdate({ url: meta.url, modified: this.modified, updated: this.updated! });
+
+            if (!this.canUpdate()) {
+                this.push(null);
+                return;
             }
         }
         catch (err) {
@@ -527,25 +493,14 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
             }
         }
         finally {
+            this.#fetch = undefined;
+            this.processing = false;
+
             this._stallCheck(updated);
 
-            // Assign #nextUpdate
-
-            if (!this.destroyed && this.#index) {
-                if (this.#playlist && this.canUpdate()) {
-                    this.#nextUpdate = this._delayedUpdate(this.#playlist, updated, errored || this.#rejected > 1);
-                    this.#nextUpdate.catch(this._updateErrorHandler.bind(this));
-                }
-                else {
-                    this.#nextUpdate = Promise.reject(new Error('Index cannot be updated'));
-                }
+            if (more && this.index?.isLive()) {
+                this._startUpdate(updated, errored || this.#rejected > 1);
             }
-            else {
-                this.#nextUpdate = Promise.reject(new Error('Failed to fetch index'));
-            }
-
-            assert(this.#nextUpdate);
-            this.#nextUpdate.catch(ignore);
         }
     }
 
@@ -566,14 +521,16 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
     /**
      * Calls _performUpdate() with corrected url, after an approriate delay
      */
-    private async _delayedUpdate(fromPlaylist: ParsedPlaylist, wasUpdated: boolean, wasError = false): ReturnType<HlsPlaylistReader['_performUpdate']> {
-
-        let delayMs = this._getUpdateInterval(fromPlaylist, wasUpdated && !wasError) * 1000;
+    private async _delayedUpdate(fromPlaylist: ParsedPlaylist, wasUpdated = true, wasError = false): ReturnType<HlsPlaylistReader['_performUpdate']> {
 
         const url = new URL(this.url as any);
         if (url.protocol === 'data:') {
             throw new Error('data: uri cannot be updated');
         }
+
+        let delayMs = this._getUpdateInterval(fromPlaylist, wasUpdated && !wasError) * 1000;
+
+        delayMs -= Date.now() - +this.updated!;
 
         // Apply SERVER-CONTROL, if available
 
@@ -592,23 +549,25 @@ export class HlsPlaylistReader extends TypedEmitter(HlsPlaylistReaderEvents) {
             delayMs = 0;
         }
 
-        if (delayMs && this.#watcher) {
-            try {
-                await Promise.race([wait(delayMs), this.#watcher.next()]);
-            }
-            catch (err) {
-                if (!this.destroyed) {
-                    this.emit<'problem'>('problem', err);
+        if (delayMs > 0) {
+            if (this.#watcher) {
+                try {
+                    await Promise.race([wait(delayMs), this.#watcher.next()]);
                 }
+                catch (err) {
+                    if (!this.destroyed) {
+                        this.emit<'problem'>('problem', err);
+                    }
 
-                this.#watcher = undefined;
+                    this.#watcher = undefined;
+                }
             }
-        }
-        else {
-            await wait(delayMs);
-        }
+            else {
+                await wait(delayMs);
+            }
 
-        assert(!this.destroyed, 'destroyed');
+            assert(!this.destroyed, 'destroyed');
+        }
 
         return await this._performUpdate(this._createFetch(url), fromPlaylist.index);
     }

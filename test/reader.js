@@ -25,7 +25,7 @@ const internals = {};
 // Test shortcuts
 
 const lab = exports.lab = Lab.script();
-const { after, afterEach, before, beforeEach, describe, it } = lab;
+const { after, before, describe, it } = lab;
 const { expect } = Code;
 
 
@@ -125,7 +125,7 @@ describe('HlsSegmentReader()', () => {
             const promise = readSegments(`http://localhost:${server.info.port}/simple/index.m3u8`);
 
             let remoteIndex;
-            promise.reader.reader.on('index', (index) => {
+            promise.reader.on('index', (index) => {
 
                 remoteIndex = index;
             });
@@ -150,7 +150,7 @@ describe('HlsSegmentReader()', () => {
             }
         });
 
-/*        it('emits the "index" event before starting', async () => {
+        it('emits the "index" event before starting', async () => {
 
             const promise = readSegments(`http://localhost:${server.info.port}/simple/500.m3u8`);
 
@@ -171,7 +171,7 @@ describe('HlsSegmentReader()', () => {
             await promise;
 
             expect(hasSegment).to.be.true();
-        });*/
+        });
 
         it('supports the startDate option', async () => {
 
@@ -270,8 +270,8 @@ describe('HlsSegmentReader()', () => {
         const prepareLiveReader = function (readerOptions = {}, state = {}) {
 
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
-            reader.reader._intervals = [];
-            reader.reader._getUpdateInterval = function (updated) {
+            reader.feeder._intervals = [];
+            reader.feeder._getUpdateInterval = function (updated) {
 
                 this._intervals.push(HlsPlaylistReader.prototype._getUpdateInterval.call(this, updated));
                 return undefined;
@@ -282,13 +282,13 @@ describe('HlsSegmentReader()', () => {
             return { reader, state: serverState.state };
         };
 
-        beforeEach(() => {
+        before(() => {
 
             liveServer = Shared.provisionLiveServer(serverState);
             return liveServer.start();
         });
 
-        afterEach(() => {
+        after(() => {
 
             return liveServer.stop();
         });
@@ -304,9 +304,9 @@ describe('HlsSegmentReader()', () => {
 
                 if (obj.msn > 5) {
                     state.firstMsn++;
-                    if (state.firstMsn === 5) {
+                    if (state.firstMsn >= 5) {
+                        state.firstMsn = 5;
                         state.ended = true;
-                        await Hoek.wait(50);
                     }
                 }
             }
@@ -388,7 +388,7 @@ describe('HlsSegmentReader()', () => {
 
             const closeEvent = Events.once(reader, 'close');
 
-            const playlist = await reader.reader.waitForUpdate();
+            const playlist = await reader._waitForUpdate();
             expect(playlist).to.exist();
 
             reader.destroy();
@@ -399,64 +399,75 @@ describe('HlsSegmentReader()', () => {
 
         it('handles sequence number resets', async () => {
 
-            const { reader, state } = prepareLiveReader({}, { firstMsn: 10 });
-            const segments = [];
             let reset = false;
+            const { reader, state } = prepareLiveReader({}, {
+                firstMsn: 9,
+                segmentCount: 5,
+                index() {
 
+                    if (!state.ended) {
+                        if (!reset) {
+                            state.firstMsn++;
+
+                            if (state.firstMsn === 13) {
+                                state.firstMsn = 0;
+                                state.segmentCount = 1;
+                                reset = true;
+                            }
+                        }
+                        else {
+                            state.segmentCount++;
+                            if (state.segmentCount === 5) {
+                                state.ended = true;
+                            }
+                        }
+                    }
+
+                    return Shared.genIndex(state);
+                }
+            });
+
+            const segments = [];
             for await (const obj of reader) {
                 segments.push(obj);
-
-                if (!reset) {
-                    state.firstMsn++;
-
-                    if (state.firstMsn === 16) {
-                        state.firstMsn = 0;
-                        state.segmentCount = 1;
-                        reset = true;
-
-                        await Hoek.wait(50);
-                    }
-                }
-                else {
-                    state.segmentCount++;
-                    if (state.segmentCount === 5) {
-                        state.ended = true;
-                        await Hoek.wait(50);
-                    }
-                }
             }
 
-            expect(segments).to.have.length(11);
-            expect(segments[6].msn).to.equal(0);
-            expect(segments[5].entry.discontinuity).to.be.false();
-            expect(segments[6].entry.discontinuity).to.be.true();
-            expect(segments[7].entry.discontinuity).to.be.false();
+            expect(segments).to.have.length(12);
+            expect(segments[7].msn).to.equal(0);
+            expect(segments[6].entry.discontinuity).to.be.false();
+            expect(segments[7].entry.discontinuity).to.be.true();
+            expect(segments[8].entry.discontinuity).to.be.false();
         });
 
         it('handles sequence number jumps', async () => {
 
-            const { reader, state } = prepareLiveReader();
-            const segments = [];
             let skipped = false;
+            const { reader, state } = prepareLiveReader({}, {
+                index() {
 
+                    const index = Shared.genIndex(state);
+
+                    if (!skipped) {
+                        ++state.firstMsn;
+                        if (state.firstMsn === 5) {
+                            state.firstMsn = 50;
+                            skipped = true;
+                        }
+                    }
+                    else if (skipped) {
+                        ++state.firstMsn;
+                        if (state.firstMsn === 55) {
+                            state.ended = true;
+                        }
+                    }
+
+                    return index;
+                }
+            });
+
+            const segments = [];
             for await (const obj of reader) {
                 segments.push(obj);
-
-                if (!skipped && obj.msn >= state.segmentCount - 1) {
-                    state.firstMsn++;
-                    if (state.firstMsn === 5) {
-                        state.firstMsn = 50;
-                        skipped = true;
-                    }
-                }
-
-                if (skipped && obj.msn > 55) {
-                    state.firstMsn++;
-                    if (state.firstMsn === 55) {
-                        state.ended = true;
-                        await Hoek.wait(50);
-                    }
-                }
             }
 
             expect(segments).to.have.length(29);
@@ -517,7 +528,9 @@ describe('HlsSegmentReader()', () => {
                         state.ended = true;
                     }
 
-                    return Shared.genIndex(state);
+                    const index = Shared.genIndex(state);
+
+                    return index;
                 }
             });
 
@@ -526,7 +539,8 @@ describe('HlsSegmentReader()', () => {
                 segments.push(obj);
 
                 state.firstMsn += 5;
-                await Hoek.wait(10);
+
+                await Hoek.wait(20);
             }
 
             expect(segments).to.have.length(20);
@@ -642,7 +656,7 @@ describe('HlsSegmentReader()', () => {
                 });
 
                 const errors = [];
-                reader.reader.isRecoverableUpdateError = function (err) {
+                reader.feeder.isRecoverableUpdateError = function (err) {
 
                     errors.push(err);
                     return HlsPlaylistReader.prototype.isRecoverableUpdateError.call(reader, err);
@@ -721,30 +735,44 @@ describe('HlsSegmentReader()', () => {
                 expect(reader.hints.part).to.not.exist();
             });
 
-            it('updates index outside read()', async () => {
+            it('finishes partial segments (without another read())', async () => {
 
-                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 25, part: 3 } }, (query) => genLlIndex(query, state));
+                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
+
+                let updates = 0;
+                const incrUpdates = () => updates++;
 
                 const segments = [];
-                const expected = { parts: state.partIndex, gens: 75 };
+                const expected = { parts: state.partIndex, gens: 1 };
                 for await (const obj of reader) {
                     switch (obj.msn) {
                         case 10:
-                            await Hoek.wait(500);         // Allow time for update loop to complete
+                            expected.parts = 4;
+                            obj.onUpdate = incrUpdates;
+                            break;
+                        case 11:
+                            expected.parts = 1;
+                            expected.gens = 3;
                             break;
                     }
 
+                    expect(obj.msn).to.equal(segments.length + 10);
+                    expect(obj.entry.parts).to.have.length(expected.parts);
+                    expect(obj.entry.parts[0].has('byterange')).to.be.false();
                     expect(state.genCount).to.equal(expected.gens);
+                    expect(reader.hints.part).to.exist();
                     segments.push(obj);
+
+                    expected.gens += 5;
+
+                    await obj.closed();
                 }
 
-                expect(segments.length).to.equal(12);
-                expect(segments[0].msn).to.equal(10);
+                expect(segments.length).to.equal(11);
                 expect(segments[0].entry.parts).to.have.length(5);
-                expect(segments[1].msn).to.equal(15);
-                expect(segments[1].entry.parts).to.not.exist();
-                expect(segments[11].msn).to.equal(25);
-                expect(segments[11].entry.parts).to.have.length(3);
+                expect(segments[10].entry.parts).to.have.length(3);
+                expect(updates).to.equal(1);
+                expect(reader.hints.part).to.not.exist();
             });
 
             it('ignores LL parts when lowLatency=false', async () => {
@@ -872,14 +900,7 @@ describe('HlsSegmentReader()', () => {
                     return index;
                 });
 
-                let last = reader.hints;
-                reader.reader.on('playlist', () => {
-
-                    if (reader.hints !== last) {
-                        hints.push(reader.hints);
-                        last = reader.hints;
-                    }
-                });
+                reader.on('hints', (...args) => hints.push(args));
 
                 const segments = [];
                 for await (const obj of reader) {

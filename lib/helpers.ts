@@ -27,7 +27,7 @@ const internals = {
 export class Deferred<T> {
 
     promise: Promise<T>;
-    resolve: (arg: T) => void = undefined as any;
+    resolve: (arg?: T) => void = undefined as any;
     reject: (err: Error) => void = undefined as any;
 
     constructor() {
