@@ -1,12 +1,12 @@
 import type { URL } from 'url';
-import type { Byterange } from './helpers';
+import type { Byterange } from 'hls-playlist-reader/lib/helpers';
 
 import { finished } from 'stream';
 import { promisify } from 'util';
 
 import { applyToDefaults, assert } from '@hapi/hoek';
 
-import {  performFetch } from './helpers';
+import { performFetch } from 'hls-playlist-reader/lib/helpers';
 
 
 const internals = {

@@ -494,9 +494,9 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer(reader, { fullStream: false, withData: true, ...readerOptions });
 
             reader.feeder._intervals = [];
-            reader.feeder._getUpdateInterval = function (updated) {
+            reader.feeder.getUpdateInterval = function (...args) {
 
-                this._intervals.push(HlsPlaylistReader.prototype._getUpdateInterval.call(this, updated));
+                this._intervals.push(HlsPlaylistReader.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;
             };
 

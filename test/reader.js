@@ -14,12 +14,6 @@ const M3U8Parse = require('m3u8parse');
 
 const Shared = require('./_shared');
 const { HlsSegmentReader, HlsPlaylistReader } = require('..');
-const { AttrList } = require('m3u8parse/lib/attrlist');
-
-
-// Declare internals
-
-const internals = {};
 
 
 // Test shortcuts
@@ -80,36 +74,6 @@ describe('HlsSegmentReader()', () => {
 
             expect(createObject).to.throw();
         });
-    });
-
-    it('emits error on missing remote host', async () => {
-
-        const promise = readSegments('http://does.not.exist/simple/500.m3u8');
-        await expect(promise).to.reject(Error, /getaddrinfo ENOTFOUND does\.not\.exist/);
-    });
-
-    it('emits error for missing data', async () => {
-
-        const promise = readSegments(`http://localhost:${server.info.port}/notfound`);
-        await expect(promise).to.reject(Error, /Not Found/);
-    });
-
-    it('emits error for http error responses', async () => {
-
-        const promise = readSegments(`http://localhost:${server.info.port}/error`);
-        await expect(promise).to.reject(Error, /Internal Server Error/);
-    });
-
-    it('emits error on non-index responses', async () => {
-
-        const promise = readSegments(`http://localhost:${server.info.port}/simple/500.ts`);
-        await expect(promise).to.reject(Error, /Invalid MIME type/);
-    });
-
-    it('emits error on malformed index files', async () => {
-
-        const promise = readSegments(`http://localhost:${server.info.port}/simple/malformed.m3u8`);
-        await expect(promise).to.reject(M3U8Parse.ParserError);
     });
 
     describe('master index', () => {
@@ -271,9 +235,9 @@ describe('HlsSegmentReader()', () => {
 
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
             reader.feeder._intervals = [];
-            reader.feeder._getUpdateInterval = function (updated) {
+            reader.feeder.getUpdateInterval = function (...args) {
 
-                this._intervals.push(HlsPlaylistReader.prototype._getUpdateInterval.call(this, updated));
+                this._intervals.push(HlsPlaylistReader.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;
             };
 
@@ -874,42 +838,6 @@ describe('HlsSegmentReader()', () => {
                 expect(segments).to.have.length(11);
                 expect(segments[0].entry.parts).to.have.length(5);
                 expect(segments[10].entry.parts).to.have.length(3);
-            });
-
-            it('handles weird hint changes (or no change)', async () => {
-
-                const hints = [];
-                const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 15, part: 3 } }, (query) => {
-
-                    const index = genLlIndex(query, state);
-
-                    let hint;
-
-                    if (state.partIndex === 1 || state.partIndex === 2) {
-                        hint = new AttrList({ type: 'PART', uri: '"a"' });
-                    }
-                    else if (state.partIndex === 3) {
-                        hint = new AttrList({ type: 'PART', uri: '"a"', 'byterange-start': '0' });
-                    }
-                    else if (state.partIndex === 4) {
-                        hint = new AttrList({ type: 'PART', uri: '"a"', 'byterange-start': '0', 'byterange-length': '10' });
-                    }
-
-                    index.meta.preload_hints = hint ? [hint] : undefined;
-
-                    return index;
-                });
-
-                reader.on('hints', (...args) => hints.push(args));
-
-                const segments = [];
-                for await (const obj of reader) {
-                    expect(obj.msn).to.equal(segments.length + 10);
-                    segments.push(obj);
-                }
-
-                expect(segments).to.have.length(6);
-                expect(hints).to.have.length(3 * 6);
             });
 
             it('handles active parts being evicted from index', async () => {

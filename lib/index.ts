@@ -1,9 +1,9 @@
-import { HlsPlaylistReader, HlsPlaylistReaderOptions } from './playlist-reader';
+import { HlsPlaylistReader, HlsPlaylistReaderOptions } from 'hls-playlist-reader';
 import { HlsSegmentReader, HlsSegmentReaderOptions } from './segment-reader';
 import { HlsSegmentStreamer, HlsSegmentStreamerOptions } from './segment-streamer';
 
 export { HlsReaderObject } from './segment-reader';
-export type { HlsIndexMeta } from './playlist-reader';
+export type { HlsIndexMeta } from 'hls-playlist-reader';
 export { HlsStreamerObject } from './segment-streamer';
 
 const createSimpleReader = function (uri: string, options: HlsSegmentReaderOptions & HlsSegmentStreamerOptions = {}): HlsSegmentStreamer {

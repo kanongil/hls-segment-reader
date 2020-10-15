@@ -2,16 +2,15 @@
 import type { Readable } from 'stream';
 import type { MasterPlaylist, MediaPlaylist } from 'm3u8parse';
 import type { HlsSegmentReader, HlsReaderObject } from './segment-reader';
-import type { FetchResult, Byterange } from './helpers';
+import type { FetchResult, Byterange } from 'hls-playlist-reader/lib/helpers';
 
 import { Stream, finished } from 'stream';
 import { URL } from 'url';
 
 import { assert as hoekAssert } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse';
-import { Transform } from 'readable-stream';
 
-import { DuplexEvents, TypedEmitter, TypedTransform } from './raw/typed-readable';
+import { DuplexEvents, TypedEmitter, TypedTransform } from 'hls-playlist-reader/lib/raw/typed-readable';
 import { SegmentDownloader } from './segment-downloader';
 
 import { types as MimeTypes } from 'mime-types';
@@ -99,14 +98,12 @@ export type HlsSegmentStreamerOptions = {
     highWaterMark?: number;
 };
 
-const HlsReaderObjectType = <HlsReaderObject>(null as any);
-const HlsStreamerObjectType = <HlsStreamerObject>(null as any);
 const HlsSegmentStreamerEvents = <IHlsSegmentStreamerEvents & DuplexEvents<HlsStreamerObject>>(null as any);
 interface IHlsSegmentStreamerEvents {
     problem(err: Error): void;
 }
 
-export class HlsSegmentStreamer extends TypedTransform(HlsReaderObjectType, HlsStreamerObjectType, TypedEmitter(HlsSegmentStreamerEvents, Transform)) {
+export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, TypedTransform<HlsReaderObject, HlsStreamerObject>()) {
 
     baseUrl = 'unknown:';
     readonly withData: boolean;

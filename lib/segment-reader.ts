@@ -1,10 +1,10 @@
 import { assert as hoekAssert } from '@hapi/hoek';
 import { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
-import { Transform } from 'readable-stream';
 
-import { Deferred } from './helpers';
-import { DuplexEvents, TypedDuplex, TypedEmitter } from './raw/typed-readable';
-import { HlsIndexMeta, HlsPlaylistReader, HlsPlaylistReaderOptions, ParsedPlaylist, PartData, PlaylistReaderObject, PreloadHints } from './playlist-reader';
+import { Deferred } from 'hls-playlist-reader/lib/helpers';
+import { DuplexEvents, TypedDuplex, TypedEmitter } from 'hls-playlist-reader/lib/raw/typed-readable';
+import { HlsIndexMeta, HlsPlaylistReader, HlsPlaylistReaderOptions } from 'hls-playlist-reader';
+import type { ParsedPlaylist, PartData, PlaylistReaderObject, PreloadHints } from 'hls-playlist-reader/lib/playlist-reader';
 
 
 // eslint-disable-next-line func-style
@@ -121,8 +121,6 @@ export type HlsSegmentReaderOptions = {
 } & HlsPlaylistReaderOptions;
 
 
-const PlaylistReaderObjectType = <Readonly<PlaylistReaderObject>>(null as any);
-const SegmentReaderObjectType = <HlsReaderObject>(null as any);
 const HlsSegmentReaderEvents = <IHlsSegmentReaderEvents & DuplexEvents<HlsReaderObject>>(null as any);
 interface IHlsSegmentReaderEvents {
     index(index: Readonly<MasterPlaylist | MediaPlaylist>, meta: Readonly<HlsIndexMeta>): void;
@@ -134,7 +132,7 @@ interface IHlsSegmentReaderEvents {
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReader extends TypedDuplex(PlaylistReaderObjectType, SegmentReaderObjectType, TypedEmitter(HlsSegmentReaderEvents, Transform)) {
+export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, TypedDuplex<Readonly<PlaylistReaderObject>, HlsReaderObject>()) {
 
     readonly fullStream: boolean;
     startDate?: Date;
@@ -324,7 +322,7 @@ export class HlsSegmentReader extends TypedDuplex(PlaylistReaderObjectType, Segm
         let playlist = this.#playlist;
         while (!this.destroyed) {
             if (playlist) {
-                const updated = !from || !playlist.index.isLive() || !playlist.isSameHead(from, this.feeder.lowLatency);
+                const updated = !from || !playlist.index.isLive() || !playlist.isSameHead(from);
                 if (updated) {
                     return playlist;
                 }
