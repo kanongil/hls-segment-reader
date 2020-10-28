@@ -5,6 +5,7 @@ import { Deferred } from 'hls-playlist-reader/lib/helpers';
 import { DuplexEvents, TypedDuplex, TypedEmitter } from 'hls-playlist-reader/lib/raw/typed-readable';
 import { HlsIndexMeta, HlsPlaylistReader, HlsPlaylistReaderOptions } from 'hls-playlist-reader';
 import type { ParsedPlaylist, PartData, PlaylistReaderObject, PreloadHints } from 'hls-playlist-reader/lib/playlist-reader';
+import type { DuplexOptions } from 'readable-stream';
 
 
 // eslint-disable-next-line func-style
@@ -150,7 +151,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
-        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true });
+        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true } as DuplexOptions);
 
         this.fullStream = !!options.fullStream;
 
