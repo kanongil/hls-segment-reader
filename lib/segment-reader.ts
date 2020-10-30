@@ -144,7 +144,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
     #next = new SegmentPointer();
     #current: HlsReaderObject | null = null;
     #playlist?: ParsedPlaylist;
-    #nextPlaylist = new Deferred<ParsedPlaylist>();
+    #nextPlaylist = new Deferred<ParsedPlaylist>(true);
     #needRead = new Deferred<void>();
     #lastHints: PreloadHints;
     #readActive = false;
@@ -159,8 +159,6 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         this.startDate = options.startDate ? new Date(options.startDate) : undefined;
         this.stopDate = options.stopDate ? new Date(options.stopDate) : undefined;
-
-        this.#nextPlaylist = new Deferred();
 
         this.feeder = new HlsPlaylistReader(src, options);
         this.#lastHints = this.feeder.hints;
@@ -219,7 +217,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
             this.#playlist = playlist;
             process.nextTick(this.#nextPlaylist.resolve, playlist);
-            this.#nextPlaylist = new Deferred();
+            this.#nextPlaylist = new Deferred(true);
 
             // Wait until output side needs more segments
 
