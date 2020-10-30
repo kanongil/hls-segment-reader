@@ -229,12 +229,12 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
     protected _onReaderIndex(index: Readonly<MediaPlaylist | MasterPlaylist>, { url }: { url: string }): void {
 
+        this.baseUrl = url;
+
         if (index.master) {
             this.destroy(new Error('The reader source is a master playlist'));
             return;
         }
-
-        this.baseUrl = url;
 
         // Update active token list
 
