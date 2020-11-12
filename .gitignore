@@ -1,2 +1,4 @@
 /node_modules/
+/lib/*.js
+/lib/*.d.ts
 coverage.html
