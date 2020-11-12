@@ -137,7 +137,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     readonly fullStream: boolean;
     startDate?: Date;
-    stopDate?: Date; // TODO: move to reader??
+    stopDate?: Date;
 
     readonly feeder: HlsPlaylistReader;
 
@@ -328,7 +328,6 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
             }
 
             // Signal stall
-            // TODO: is this ok???
 
             const deferred = this.#needRead;
             this.#needRead = new Deferred();

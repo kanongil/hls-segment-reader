@@ -191,7 +191,6 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
     _destroy(err: Error | null, cb: unknown): void {
 
-        // FIXME: is reader unpiped first???
         if (this.#reader && !this.#reader.destroyed) {
             this.#reader.destroy(err || undefined);
         }

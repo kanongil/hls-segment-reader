@@ -97,6 +97,14 @@ exports.provisionLiveServer = function (shared) {
             unstableStream.push(Buffer.alloc(50 - shared.state.unstable));
             unstableStream.push(null);
 
+            unstableStream.once('end', () => {
+
+                // Manually destroy socket in case it is a keep-alive connection
+                // otherwise the receiver will never know that the request is done
+
+                request.raw.req.destroy();
+            });
+
             return h.response(unstableStream).type('video/mp2t').bytes(size);
         }
 

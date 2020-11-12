@@ -663,7 +663,7 @@ describe('HlsSegmentStreamer()', () => {
 
             // Note: the eviction logic works on index updates, with a delay to allow an initial segment load some time to complete - otherwise it could be scheduled, have an immediate update, and be aborted before being given a chance
 
-            const { reader, state } = prepareLiveReader({ fullStream: true }, { slow: true });
+            const { reader, state } = prepareLiveReader({ fullStream: true }, { segmentCount: 3, slow: true });
             const segments = [];
 
             for await (const obj of reader) {
@@ -676,8 +676,8 @@ describe('HlsSegmentStreamer()', () => {
                 }
             }
 
-            expect(segments.length).to.equal(13);
-            expect(segments[0].stream.destroyed).to.be.true();
+            expect(segments.length).to.equal(6);
+            expect(segments[0].stream.destroyed).to.be.true(); // Test
 
             reader.abort();
         });
