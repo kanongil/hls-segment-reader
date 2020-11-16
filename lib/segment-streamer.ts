@@ -122,6 +122,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
     #active = new Map<number, FetchResult>(); // used to stop buffering on expired segments
     #downloader: SegmentDownloader;
     #reader?: HlsSegmentReader;
+    #started = false;
 
     #onReaderIndex = this._onReaderIndex.bind(this);
     #onReaderProblem = this._onReaderProblem.bind(this);
@@ -312,42 +313,41 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
         // At this point object.stream has only been readied / opened
 
+        let stream = fetch.stream;
         try {
             // Check meta
 
             if (this.#reader && fetch.meta.modified) {
                 const segmentTime = segment.entry.program_time || new Date(+fetch.meta.modified - (segment.entry.duration || 0) * 1000);
 
-                if (this.#reader.startDate && segmentTime < this.#reader.startDate) {
-                    throw new Error('too early');
+                if (!this.#started && this.#reader.startDate &&
+                    segmentTime < this.#reader.startDate) {
+
+                    return;   // Too early - ignore segment
                 }
 
-                if (this.#reader.stopDate && segmentTime > this.#reader.stopDate) {
-                    // eslint-disable-next-line @typescript-eslint/no-throw-literal
-                    throw 'ended';
+                if (this.#reader.stopDate &&
+                    segmentTime > this.#reader.stopDate) {
+
+                    this.push(null);
+                    return;
                 }
             }
 
             // Track embedded stream to append more parts later
 
-            if (fetch.stream) {
+            if (stream) {
                 this.#active.set(segment.msn, fetch);
-                finished(fetch.stream, () => this.#active.delete(segment.msn));
+                finished(stream, () => this.#active.delete(segment.msn));
             }
 
-            this.push(new HlsStreamerObject(fetch.meta, fetch.stream, 'segment', segment));
+            this.push(new HlsStreamerObject(fetch.meta, stream, 'segment', segment));
+            stream = undefined; // Don't destroy
+
+            this.#started = true;
         }
-        catch (err) {
-            if (fetch.stream && !fetch.stream.destroyed) {
-                fetch.stream.destroy(err);
-            }
-
-            if (err === 'ended') {
-                this.push(null);
-                return;
-            }
-
-            throw err;
+        finally {
+            stream?.destroy();
         }
     }
 
