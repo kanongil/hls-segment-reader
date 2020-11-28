@@ -152,6 +152,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
         super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true } as DuplexOptions);
+        this.on('end', () => this.destroy());    // autoDestroy is a lie...
 
         this.fullStream = !!options.fullStream;
 
