@@ -41,6 +41,18 @@ class SegmentPointer {
     }
 }
 
+class UnendingPlaylistReader extends HlsPlaylistReader {
+
+    protected preprocessIndex<T extends MediaPlaylist | MasterPlaylist>(index: T): T | undefined {
+
+        if (!index.master) {
+            MediaPlaylist.cast(index).ended = false;
+        }
+
+        return super.preprocessIndex(index);
+    }
+}
+
 export class HlsReaderObject {
 
     readonly msn: number;
@@ -161,7 +173,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         this.startDate = options.startDate ? new Date(options.startDate) : undefined;
         this.stopDate = options.stopDate ? new Date(options.stopDate) : undefined;
 
-        this.feeder = new HlsPlaylistReader(src, options);
+        this.feeder = new (this.stopDate ? UnendingPlaylistReader : HlsPlaylistReader)(src, options);
         this.#lastHints = this.feeder.hints;
 
         this.feeder.on<'problem'>('problem', (err) => !this.destroyed && this.emit<'problem'>('problem', err));
