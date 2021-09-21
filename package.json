@@ -7,7 +7,7 @@
     "clean": "rm -f lib/*.{js,d.ts}",
     "postpack": "npm run clean",
     "prepack": "tsc",
-    "test": "lab -t 90 -L",
+    "test": "lab -t 90",
     "test-full": "npm test && npm run test-js",
     "test-cov-html": "lab -c -r html -o coverage.html",
     "test-js": "tsc && lab --transform '' --t 0 && npm run clean"
