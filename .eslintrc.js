@@ -9,7 +9,7 @@ const tsifyRules = function (from) {
     const rules = {};
 
     for (const rule in from) {
-        if (TypescriptRules[rule]) {
+        if (TypescriptRules[rule] && rule !== 'padding-line-between-statements') {
             rules[rule] = 'off';
             rules[`@typescript-eslint/${rule}`] = from[rule];
         }

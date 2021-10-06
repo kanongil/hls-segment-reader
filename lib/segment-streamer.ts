@@ -273,7 +273,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
                         tries++;
                         fetch = await this._fetchFrom(this._tokenForMsn(segment.msn, segment.entry.map), { uri, byterange });
                     }
-                    catch (err) {
+                    catch (err: any) {
                         if (tries >= 4) {
                             throw err;
                         }

@@ -5,7 +5,6 @@ import { Deferred } from 'hls-playlist-reader/lib/helpers';
 import { DuplexEvents, TypedDuplex, TypedEmitter } from 'hls-playlist-reader/lib/raw/typed-readable';
 import { HlsIndexMeta, HlsPlaylistReader, HlsPlaylistReaderOptions } from 'hls-playlist-reader';
 import type { ParsedPlaylist, PartData, PlaylistReaderObject, PreloadHints } from 'hls-playlist-reader/lib/playlist-reader';
-import type { DuplexOptions } from 'readable-stream';
 
 
 // eslint-disable-next-line func-style
@@ -163,8 +162,8 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
-        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true } as DuplexOptions);
-        this.once('end', () => this._writableState.ended || setImmediate(() => this.end()));    // end writable side when readable ends
+        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true });
+        this.once('end', () => this.writableEnded || setImmediate(() => this.end()));    // end writable side when readable ends
 
         this.fullStream = !!options.fullStream;
 
@@ -179,7 +178,9 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         this.feeder.on<'problem'>('problem', (err) => !this.destroyed && this.emit<'problem'>('problem', err));
         this.feeder.on<'error'>('error', (err) => {
 
-            this.destroy(this._readableState.ended ? undefined : err);
+            // Must defer to NT since this.readableEnded might already have been scheduled
+
+            process.nextTick(() => this.destroy(this.readableEnded ? undefined : err));
         });
 
         this.feeder.pipe(this, { end: false });
@@ -238,7 +239,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                 await this.#needRead.promise;
             }
         }
-        catch (err) {
+        catch (err: any) {
             //this.#nextPlaylist.reject(err);
             return done(err);
         }
@@ -290,7 +291,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                         more ||= !await this._getNextSegment(new SegmentPointer(result.ptr.msn)); // fetch until we have the full segment
                     }
                 }
-                catch (err) {
+                catch (err: any) {
                     if (this.index) {
                         if (this.index.master) {
                             this.push(null);                    // Just ignore any error
@@ -307,7 +308,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                 }
             }
         }
-        catch (err) {
+        catch (err: any) {
             this.destroy(err);
         }
         finally {

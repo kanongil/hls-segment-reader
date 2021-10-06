@@ -316,7 +316,7 @@ describe('HlsSegmentReader()', () => {
                 expect(segments).to.have.length(15);
             }
             finally {
-                await Fs.promises.rmdir(tmpDir, { recursive: true });
+                await Fs.promises.rm(tmpDir, { recursive: true });
             }
         });
 
