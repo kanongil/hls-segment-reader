@@ -288,7 +288,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                     this.#readActive = more = this.push(this.#current);
 
                     if (result.segment.isPartial()) {
-                        more ||= !await this._getNextSegment(new SegmentPointer(result.ptr.msn)); // fetch until we have the full segment
+                        more || (more = !await this._getNextSegment(new SegmentPointer(result.ptr.msn))); // fetch until we have the full segment
                     }
                 }
                 catch (err: any) {

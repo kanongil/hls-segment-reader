@@ -10,7 +10,7 @@ const createSimpleReader = function (uri: string, options: HlsSegmentReaderOptio
 
     const reader = new HlsSegmentReader(uri, options);
 
-    options.withData ??= false;
+    options.withData ?? (options.withData = false);
 
     const streamer = new HlsSegmentStreamer(reader, options);
 
