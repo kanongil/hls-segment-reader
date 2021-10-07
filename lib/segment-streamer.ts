@@ -129,7 +129,12 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
     constructor(reader?: HlsSegmentReader, options: HlsSegmentStreamerOptions = {}) {
 
-        super({ objectMode: true, writableHighWaterMark: 0, readableHighWaterMark: (reader as any)?.highWaterMark ?? options.highWaterMark ?? 0 });
+        super({ objectMode: true, allowHalfOpen: false, autoDestroy: false, writableHighWaterMark: 0, readableHighWaterMark: (reader as any)?.highWaterMark ?? options.highWaterMark ?? 0 });
+
+        // autoDestroy is broken for transform streams on node 14, so we need to manually emit 'close' after 'end'
+        // Don't actually call destroy(), since it will trigger an abort() that aborts all tracked segment fetches
+
+        this.on('end', () => process.nextTick(() => this.emit('close')));
 
         if (typeof reader === 'object' && !(reader instanceof Stream)) {
             options = reader;
@@ -185,9 +190,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
             return;
         }
 
-        if (!this.readableEnded) {
-            this.push(null);
-        }
+        this.push(null);
     }
 
     _destroy(err: Error | null, cb: unknown): void {

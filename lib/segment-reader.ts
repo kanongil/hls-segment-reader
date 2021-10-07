@@ -162,8 +162,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
-        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true });
-        this.once('end', () => this.writableEnded || setImmediate(() => this.end()));    // end writable side when readable ends
+        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true, allowHalfOpen: false });
 
         this.fullStream = !!options.fullStream;
 
