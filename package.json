@@ -22,7 +22,7 @@
   "author": "Gil Pedersen <gpdev@gpost.dk>",
   "license": "BSD-2-Clause",
   "engines": {
-    "node": ">=14.17.0"
+    "node": "^14.17.0"
   },
   "dependencies": {
     "@hapi/hoek": "^9.0.4",
