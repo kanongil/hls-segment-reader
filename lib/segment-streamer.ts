@@ -388,15 +388,18 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
         const current = new Set<number | string>();
         for (let i = index.startMsn(true); i <= index.lastMsn(true); ++i) {
-            const token = this._tokenForMsn(i);
-            current.add(token);
-            old.delete(token);
+            const segment = index.getSegment(i);
+            if (segment) {
+                const token = this._tokenForMsn(i);
+                current.add(token);
+                old.delete(token);
 
-            const map = index.getSegment(i)!.map;
-            if (map) {
-                const mapToken = this._tokenForMsn(i, map);
-                current.add(mapToken);
-                old.delete(mapToken);
+                const map = segment.map;
+                if (map) {
+                    const mapToken = this._tokenForMsn(i, map);
+                    current.add(mapToken);
+                    old.delete(mapToken);
+                }
             }
         }
 
