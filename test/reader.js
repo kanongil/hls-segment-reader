@@ -184,7 +184,7 @@ describe('HlsSegmentReader()', () => {
             expect(segments[1].entry.vendor[0]).to.equal(['#EXT-MY-SEGMENT-OK', null]);
         });
 
-        it('does not internally buffer (highWaterMark=0)', async () => {
+        it('does not internally buffer', async () => {
 
             const r = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'));
 
