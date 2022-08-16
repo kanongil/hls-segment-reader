@@ -19,28 +19,17 @@ const tsifyRules = function (from) {
 };
 
 
-module.exports = {
-    root: true,
-    extends: [
-        'plugin:@hapi/recommended',
-        'plugin:@typescript-eslint/eslint-recommended'
-    ],
-    plugins: [
-        '@typescript-eslint'
-    ],
-    parserOptions: {
-        ecmaVersion: 2019
-    },
-    ignorePatterns: ['/lib/*.js', '/lib/*.d.ts'],
-    overrides: [{
-        files: ['lib/**/*.ts'],
+const typescript = function (project, files) {
+
+    return {
+        files,
         extends: [
             'plugin:@typescript-eslint/recommended'
         ],
         parser: '@typescript-eslint/parser',
         parserOptions: {
             sourceType: 'module',
-            project: './tsconfig.json',
+            project,
             tsconfigRootDir: __dirname
         },
         rules: {
@@ -54,5 +43,24 @@ module.exports = {
             '@typescript-eslint/type-annotation-spacing': 'warn',
             '@typescript-eslint/unified-signatures': 'warn'
         }
-    }]
+    };
+};
+
+module.exports = {
+    root: true,
+    extends: [
+        'plugin:@hapi/recommended',
+        'plugin:@typescript-eslint/eslint-recommended'
+    ],
+    plugins: [
+        '@typescript-eslint'
+    ],
+    parserOptions: {
+        ecmaVersion: 2020
+    },
+    ignorePatterns: ['/lib/*.js', '/lib/*.d.ts'],
+    overrides: [
+        typescript('./tsconfig.json', ['lib/**/*.ts']),
+        typescript('./test/tsconfig.json', ['test/*.ts'])
+    ]
 };
