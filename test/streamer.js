@@ -4,6 +4,7 @@ const Crypto = require('crypto');
 const Path = require('path');
 
 const Code = require('@hapi/code');
+const { HlsPlaylistFetcher } = require('hls-playlist-reader');
 const Hoek = require('@hapi/hoek');
 const Lab = require('@hapi/lab');
 const { MediaSegment, AttrList } = require('m3u8parse');
@@ -12,7 +13,7 @@ const Uristream = require('uristream');
 const Shared = require('./_shared');
 
 // eslint-disable-next-line @hapi/capitalize-modules
-const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer, HlsPlaylistReader } = require('..');
+const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer } = require('..');
 
 
 // Declare internals
@@ -493,10 +494,10 @@ describe('HlsSegmentStreamer()', () => {
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, readerOptions);
             const streamer = new HlsSegmentStreamer(reader, { fullStream: false, withData: true, ...readerOptions });
 
-            reader.feeder._intervals = [];
-            reader.feeder.getUpdateInterval = function (...args) {
+            reader.fetcher._intervals = [];
+            reader.fetcher.getUpdateInterval = function (...args) {
 
-                this._intervals.push(HlsPlaylistReader.prototype.getUpdateInterval.call(this, ...args));
+                this._intervals.push(HlsPlaylistFetcher.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;
             };
 

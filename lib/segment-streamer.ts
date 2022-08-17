@@ -60,7 +60,7 @@ const internals = {
 
     isAbortedError(err: Error) {
 
-        return err.message === 'Aborted';
+        return err.name === 'AbortError';
     }
 };
 
@@ -148,17 +148,17 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         this.on('pipe', (src: HlsSegmentReader) => {
 
             assert(!this.#reader, 'Only one piped source is supported');
-            assert(!src.feeder.index?.master, 'Source cannot be based on a master playlist');
+            assert(!src.index?.master, 'Source cannot be based on a master playlist');
 
             this.#reader = src;
             src.on<'index'>('index', this.#onReaderIndex);
             src.on<'problem'>('problem', this.#onReaderProblem);
 
             if (src.index) {
-                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.feeder.baseUrl }));
+                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.fetcher.baseUrl }));
             }
 
-            this.baseUrl = src.feeder.baseUrl;
+            this.baseUrl = src.fetcher.baseUrl;
         });
 
         this.on('unpipe', () => {
