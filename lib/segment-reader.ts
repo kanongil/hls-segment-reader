@@ -2,7 +2,7 @@ import { assert as hoekAssert } from '@hapi/hoek';
 import { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
 import { Deferred } from 'hls-playlist-reader/lib/helpers';
-import { DuplexEvents, TypedDuplex, TypedEmitter } from 'hls-playlist-reader/lib/raw/typed-readable';
+import { ReadableEvents, TypedEmitter, TypedReadable } from 'hls-playlist-reader/lib/raw/typed-readable';
 import { HlsIndexMeta, HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader';
 import type { ParsedPlaylist, PartData, PlaylistObject } from 'hls-playlist-reader/lib/fetcher';
 
@@ -136,7 +136,7 @@ export type HlsSegmentReaderOptions = {
 } & HlsPlaylistFetcherOptions;
 
 
-const HlsSegmentReaderEvents = <IHlsSegmentReaderEvents & DuplexEvents<HlsReaderObject>>(null as any);
+const HlsSegmentReaderEvents = <IHlsSegmentReaderEvents & ReadableEvents<HlsReaderObject>>(null as any);
 interface IHlsSegmentReaderEvents {
     index(index: Readonly<MasterPlaylist | MediaPlaylist>, meta: Readonly<HlsIndexMeta>): void;
     hints(part?: PartData, map?: PartData): void;
@@ -147,7 +147,7 @@ interface IHlsSegmentReaderEvents {
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, TypedDuplex<Readonly<PlaylistObject>, HlsReaderObject>()) {
+export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, TypedReadable<HlsReaderObject>()) {
 
     readonly fullStream: boolean;
     startDate?: Date;
@@ -166,7 +166,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
-        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true, allowHalfOpen: false });
+        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true });
 
         this.fullStream = !!options.fullStream;
 
@@ -190,33 +190,13 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     private async _feedFetcher(initial: Promise<PlaylistObject>) {
 
-        let writeReady: Promise<void> | null = null;
-        const write = (data: PlaylistObject): Promise<void> | void => {
-
-            this.#index = data.index;
-
-            const writeNext = () => {
-
-                writeReady = null;
-                if (!this.write(data)) {
-                    const deferred = new Deferred<void>();
-                    this.once('drain', deferred.resolve);
-                    writeReady = deferred.promise;
-                }
-            };
-
-            return writeReady ? writeReady.then(writeNext) : writeNext();
-        };
-
         const obj = await initial;
-        await write(obj);
+        await this.writeNext(obj);
 
         while (this.fetcher.canUpdate()) {
             const update = await this.fetcher.update({ timeout: this.stallAfterMs });
-            await write(update);
+            await this.writeNext(update);
         }
-
-        this.end();
     }
 
     get index(): Readonly<MediaPlaylist | MasterPlaylist> | undefined {
@@ -224,50 +204,44 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         return this.#index;
     }
 
-    async _write(input: Readonly<PlaylistObject>, _: unknown, done: (err?: Error) => void): Promise<void> {
+    private async writeNext(input: Readonly<PlaylistObject>): Promise<void> {
 
-        try {
-            const { index, playlist, meta } = input;
+        const { index, playlist, meta } = input;
 
-            if (index.master) {
-                process.nextTick(this.emit.bind(this, 'index', index, meta));
-                process.nextTick(this.#nextPlaylist.reject, new Error('master playlist'));
-                return;
-            }
+        this.#index = index;
 
-            assert(input.playlist);
-
-            // Update current entry with latest data
-
-            if (this.#current && !this.#current.isClosed) {
-                const currentSegment = index.getSegment(this.#current.msn, true);
-                if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
-                    this.#current.entry = currentSegment;
-                }
-            }
-
-            // Emit updates
-
+        if (index.master) {
             process.nextTick(this.emit.bind(this, 'index', index, meta));
+            process.nextTick(this.#nextPlaylist.reject, new Error('master playlist'));
+            return;
+        }
 
-            // Signal new playlist is ready
+        assert(input.playlist);
 
-            this.#playlist = playlist;
-            process.nextTick(this.#nextPlaylist.resolve, playlist);
-            this.#nextPlaylist = new Deferred(true);
+        // Update current entry with latest data
 
-            // Wait until output side needs more segments
-
-            if (index.isLive()) {
-                await this.#needRead.promise;
+        if (this.#current && !this.#current.isClosed) {
+            const currentSegment = index.getSegment(this.#current.msn, true);
+            if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
+                this.#current.entry = currentSegment;
             }
         }
-        catch (err: any) {
-            //this.#nextPlaylist.reject(err);
-            return done(err);
-        }
 
-        return done();
+        // Emit updates
+
+        process.nextTick(this.emit.bind(this, 'index', index, meta));
+
+        // Signal new playlist is ready
+
+        this.#playlist = playlist;
+        process.nextTick(this.#nextPlaylist.resolve, playlist);
+        this.#nextPlaylist = new Deferred(true);
+
+        // Wait until output side needs more segments
+
+        if (index.isLive()) {
+            await this.#needRead.promise;
+        }
     }
 
     /**
