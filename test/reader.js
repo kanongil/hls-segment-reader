@@ -507,14 +507,14 @@ describe('HlsSegmentReader()', () => {
                 await Hoek.wait(20);
             }
 
-            expect(segments).to.have.length(20);
+            expect(segments).to.have.length(21);
             expect(segments.map((s) => s.msn)).to.equal([
-                6, 7, 10, 15, 20, 25, 30,
+                6, 7, 8, 10, 15, 20, 25, 30,
                 35, 40, 45, 50, 51, 52, 53,
                 54, 55, 56, 57, 58, 59
             ]);
             expect(segments.map((s) => s.entry.discontinuity)).to.equal([
-                false, false, true, true, true, true, true,
+                false, false, false, true, true, true, true, true,
                 true, true, true, true, false, false, false,
                 false, false, false, false, false, false
             ]);

@@ -190,15 +190,22 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     private async _feedFetcher(initial: Promise<PlaylistObject>) {
 
+        let writeReady: Promise<void> | null = null;
         const write = (data: PlaylistObject): Promise<void> | void => {
 
             this.#index = data.index;
 
-            if (!this.write(data)) {
-                const deferred = new Deferred<void>();
-                this.once('drain', deferred.resolve);
-                return deferred.promise;
-            }
+            const writeNext = () => {
+
+                writeReady = null;
+                if (!this.write(data)) {
+                    const deferred = new Deferred<void>();
+                    this.once('drain', deferred.resolve);
+                    writeReady = deferred.promise;
+                }
+            };
+
+            return writeReady ? writeReady.then(writeNext) : writeNext();
         };
 
         const obj = await initial;
