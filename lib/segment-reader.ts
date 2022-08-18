@@ -191,11 +191,12 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
     private async _feedFetcher(initial: Promise<PlaylistObject>) {
 
         const obj = await initial;
-        await this.writeNext(obj);
+        this.writeNext(obj);
 
         while (this.fetcher.canUpdate()) {
+            await this.#needRead.promise;
             const update = await this.fetcher.update({ timeout: this.stallAfterMs });
-            await this.writeNext(update);
+            this.writeNext(update);
         }
     }
 
@@ -204,7 +205,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         return this.#index;
     }
 
-    private async writeNext(input: Readonly<PlaylistObject>): Promise<void> {
+    private writeNext(input: Readonly<PlaylistObject>): void {
 
         const { index, playlist, meta } = input;
 
@@ -236,12 +237,6 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         this.#playlist = playlist;
         process.nextTick(this.#nextPlaylist.resolve, playlist);
         this.#nextPlaylist = new Deferred(true);
-
-        // Wait until output side needs more segments
-
-        if (index.isLive()) {
-            await this.#needRead.promise;
-        }
     }
 
     /**
