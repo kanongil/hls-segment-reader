@@ -160,7 +160,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
     #current: HlsReaderObject | null = null;
     #playlist?: ParsedPlaylist;
     #nextPlaylist = new Deferred<ParsedPlaylist>(true);
-    #needRead = new Deferred<void>();
+    #fetchUpdate = new Deferred<void>();
     #readActive = false;
     #index?: Readonly<MediaPlaylist | MasterPlaylist>;
 
@@ -188,16 +188,31 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         });
     }
 
+    /** Fetch index updates in a loop, as long as there is read() interest */
     private async _feedFetcher(initial: Promise<PlaylistObject>) {
 
         const obj = await initial;
         this.writeNext(obj);
 
         while (this.fetcher.canUpdate()) {
-            await this.#needRead.promise;
+
+            // Wait until there has been at least one new read() to automatically stop fetching when not actively used
+
+            await this.#fetchUpdate.promise;
+
             const update = await this.fetcher.update({ timeout: this.stallAfterMs });
             this.writeNext(update);
         }
+    }
+
+    /** Trigger active fetchUpdate promise and prepare the next */
+    private _requestPlaylistUpdate(): Promise<ParsedPlaylist> {
+
+        const deferred = this.#fetchUpdate;
+        this.#fetchUpdate = new Deferred<void>();
+        deferred.resolve();
+
+        return this.#nextPlaylist.promise;
     }
 
     get index(): Readonly<MediaPlaylist | MasterPlaylist> | undefined {
@@ -250,9 +265,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         this.#readActive = true;
         try {
-            const deferred = this.#needRead;
-            this.#needRead = new Deferred();
-            deferred.resolve();
+            this._requestPlaylistUpdate();
 
             let more = true;
             while (more) {
@@ -318,40 +331,19 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     // Private methods
 
-    private async _waitForUpdate(from?: Readonly<MediaPlaylist>): Promise<ParsedPlaylist> {
-
-        if (this.index?.master) {
-            throw new Error('Master playlist cannot be updated');
-        }
-
-        let playlist = this.#playlist;
-        while (!this.destroyed) {
-            if (playlist) {
-                const updated = !from || !playlist.index.isLive() || !playlist.isSameHead(from);
-                if (updated) {
-                    return playlist;
-                }
-            }
-
-            // Signal stall
-
-            const deferred = this.#needRead;
-            this.#needRead = new Deferred();
-            deferred.resolve();
-
-            // Wait for new playlist
-
-            playlist = await this.#nextPlaylist.promise;
-        }
-
-        throw new Error('Stream was destroyed');
-    }
-
+    /**
+     * 
+     *
+     * @returns `null` signals that no more segments can be returned, either because all segments have been exhausted from a non-updateable playlist,
+     * or business logic determines it is appropriate to stop.
+     */
     private async _getNextSegment(ptr: SegmentPointer): Promise<{ ptr: SegmentPointer; discont: boolean; segment: IndependentSegment } | null> {
 
-        let playlist: ParsedPlaylist | undefined;
+        let playlist = this.#playlist ?? await this._requestPlaylistUpdate();
         let discont = false;
-        while (playlist = await this._waitForUpdate(playlist?.index)) {
+        do {
+            assert(!this.destroyed);
+
             if (ptr.isEmpty()) {
                 ptr = this._initialSegmentPointer(playlist);
             }
@@ -376,20 +368,20 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                 (ptr.part && ptr.part >= (segment?.parts?.length || 0))) {
 
                 if (!playlist.index.isLive()) {
-                    return null;        // Done - nothing more to do
+                    break;        // Done - nothing more to do
                 }
 
-                continue;               // Try again
+                continue;         // Try again
             }
 
-            // Check if we need to stop
+            // Check if we need to stop due to options
 
             if (this.stopDate && (segment.program_time || 0) > this.stopDate) {
-                return null;
+                break;
             }
 
             return { ptr, discont, segment };
-        }
+        } while (playlist = await this._requestPlaylistUpdate());
 
         return null;
     }

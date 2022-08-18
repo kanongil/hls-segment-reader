@@ -352,7 +352,7 @@ describe('HlsSegmentReader()', () => {
 
             const closeEvent = Events.once(reader, 'close');
 
-            const playlist = await reader._waitForUpdate();
+            const playlist = await reader._requestPlaylistUpdate();
             expect(playlist).to.exist();
 
             reader.destroy();
