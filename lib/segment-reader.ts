@@ -116,7 +116,7 @@ export class HlsReaderObject {
         }
 
         if (this.onUpdate) {
-            process.nextTick(this.onUpdate.bind(this, this._entry, old));
+            Promise.resolve().then(this.onUpdate.bind(this, this._entry, old));
         }
     }
 }
@@ -224,8 +224,8 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         this.#index = index;
 
         if (index.master) {
-            process.nextTick(this.emit.bind(this, 'index', index, meta));
-            process.nextTick(this.#nextPlaylist.reject, new Error('master playlist'));
+            this.emit('index', index, meta);
+            this.#nextPlaylist.reject(new Error('master playlist'));
             return;
         }
 
@@ -242,12 +242,12 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         // Emit updates
 
-        process.nextTick(this.emit.bind(this, 'index', index, meta));
+        this.emit('index', index, meta);
 
         // Signal new playlist is ready
 
         this.#playlist = playlist;
-        process.nextTick(this.#nextPlaylist.resolve, playlist);
+        this.#nextPlaylist.resolve(playlist);
         this.#nextPlaylist = new Deferred(true);
     }
 
