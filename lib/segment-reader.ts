@@ -198,7 +198,9 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
             // Wait until there has been at least one new read() to automatically stop fetching when not actively used
 
-            await this.#fetchUpdate.promise;
+            if (this.#current?.isClosed !== false) {
+                await this.#fetchUpdate.promise;
+            }
 
             const update = await this.fetcher.update({ timeout: this.stallAfterMs });
             this.writeNext(update);
@@ -234,9 +236,9 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         assert(input.playlist);
 
-        // Update current entry with latest data
+        // Immediately update current entry with latest data
 
-        if (this.#current && !this.#current.isClosed) {
+        if (this.#current?.isClosed === false) {
             const currentSegment = index.getSegment(this.#current.msn, true);
             if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
                 this.#current.entry = currentSegment;
@@ -270,7 +272,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
             let more = true;
             while (more) {
                 try {
-                    const result = await this._getNextSegment(this.#next);
+                    const result = await this._getSegmentOrWait(this.#next);
 
                     this.#current?.abandon();
 
@@ -293,7 +295,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                     this.#readActive = more = this.push(this.#current);
 
                     if (result.segment.isPartial()) {
-                        more || (more = !await this._getNextSegment(new SegmentPointer(result.ptr.msn))); // fetch until we have the full segment
+                        more || (more = !await this._getSegmentOrWait(new SegmentPointer(result.ptr.msn))); // fetch until we have the full segment
                     }
                 }
                 catch (err: any) {
@@ -332,12 +334,13 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
     // Private methods
 
     /**
-     * 
+     * @argument ptr - The segment to look for. Should be within current playlist range, or 1 msn ahead of it.
      *
-     * @returns `null` signals that no more segments can be returned, either because all segments have been exhausted from a non-updateable playlist,
+     * @returns specified segment, or `null` which signals that no more segments can be returned,
+     * either because all segments have been exhausted from a non-updateable playlist,
      * or business logic determines it is appropriate to stop.
      */
-    private async _getNextSegment(ptr: SegmentPointer): Promise<{ ptr: SegmentPointer; discont: boolean; segment: IndependentSegment } | null> {
+    private async _getSegmentOrWait(ptr: SegmentPointer): Promise<{ ptr: SegmentPointer; discont: boolean; segment: IndependentSegment } | null> {
 
         let playlist = this.#playlist ?? await this._requestPlaylistUpdate();
         let discont = false;
@@ -367,7 +370,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                 (ptr.part === undefined && segment.isPartial()) ||
                 (ptr.part && ptr.part >= (segment?.parts?.length || 0))) {
 
-                if (!playlist.index.isLive()) {
+                if (!playlist.index.isLive()) { // TODO: also check fetcher???
                     break;        // Done - nothing more to do
                 }
 
