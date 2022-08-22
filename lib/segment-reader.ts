@@ -180,12 +180,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         this.fetcher = new (this.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher)(src, { ...options, onProblem });
 
-        this._feedFetcher(this.fetcher.index()).catch((err) => {
-
-            // Must defer to NT since this.readableEnded might already have been scheduled
-
-            process.nextTick(() => this.destroy(this.readableEnded ? undefined : err)); // FIXME: really needed??
-        });
+        this._feedFetcher(this.fetcher.index()).catch(this.destroy.bind(this));
     }
 
     /** Fetch index updates in a loop, as long as there is read() interest */
@@ -327,6 +322,10 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         this.#current?.abandon();
         this.fetcher.cancel();
+
+        if (err?.name === 'AbortError') {
+            err = null;
+        }
 
         super._destroy(err, cb as any);
     }
