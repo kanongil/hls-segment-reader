@@ -610,12 +610,12 @@ describe('HlsSegmentStreamer()', () => {
                 segments.push(obj);
             }
 
-            expect(segments.length).to.equal(23);
-            expect(segments[7].segment.msn).to.equal(13);
+            expect(segments.length).to.equal(21);
+            expect(segments[5].segment.msn).to.equal(11);
+            expect(segments[5].segment.entry.discontinuity).to.be.false();
+            expect(segments[6].segment.msn).to.equal(50);
+            expect(segments[6].segment.entry.discontinuity).to.be.true();
             expect(segments[7].segment.entry.discontinuity).to.be.false();
-            expect(segments[8].segment.msn).to.equal(50);
-            expect(segments[8].segment.entry.discontinuity).to.be.true();
-            expect(segments[9].segment.entry.discontinuity).to.be.false();
         });
 
         // TODO: test problem emit & data outage

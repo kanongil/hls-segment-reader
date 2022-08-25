@@ -157,11 +157,11 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
     readonly fetcher: HlsPlaylistFetcher;
 
     #next = new SegmentPointer();
-    #current: HlsReaderObject | null = null;
+    /** Current partial segment */
+    #active: HlsReaderObject | null = null;
     #playlist?: ParsedPlaylist;
     #nextPlaylist = new Deferred<ParsedPlaylist>(true);
     #fetchUpdate = new Deferred<void>();
-    #readActive = false;
     #index?: Readonly<MediaPlaylist | MasterPlaylist>;
 
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
@@ -193,7 +193,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
             // Wait until there has been at least one new read() to automatically stop fetching when not actively used
 
-            if (this.#current?.isClosed !== false) {
+            if (!this.#active) {
                 await this.#fetchUpdate.promise;
             }
 
@@ -231,12 +231,15 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
         assert(input.playlist);
 
-        // Immediately update current entry with latest data
+        // Immediately update active entry with latest data
 
-        if (this.#current?.isClosed === false) {
-            const currentSegment = index.getSegment(this.#current.msn, true);
+        if (this.#active) {
+            const currentSegment = index.getSegment(this.#active.msn, true);
             if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
-                this.#current.entry = currentSegment;
+                this.#active.entry = currentSegment;
+                if (this.#active.isClosed) {
+                    this.#active = null;
+                }
             }
         }
 
@@ -251,76 +254,90 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         this.#nextPlaylist = new Deferred(true);
     }
 
+    async _getNextSegment() {
+
+        //await this.#active?.closed();
+
+        const result = await this._getSegmentOrWait(this.#next);
+
+        this.#active?.abandon();
+        this.#active = null;
+
+        if (result) {
+            // Apply cross playlist discontinuity
+
+            if (result.discont) {
+                result.segment.discontinuity = true;
+            }
+
+            const obj = new HlsReaderObject(result.ptr.msn, result.segment);
+            this.#next = result.ptr.next();
+
+            if (result.segment.isPartial()) {
+
+                // Try to fetch remainder of segment parts (in the background)
+
+                this.#active = obj;
+                this._getSegmentOrWait(new SegmentPointer(result.ptr.msn)).catch((/*err*/) => {
+
+                    // Ignore
+
+                }).finally(() => {
+
+                    obj.abandon();
+                    if (obj === this.#active) {
+                        this.#active = null;
+                    }
+                });
+            }
+
+            return obj;
+        }
+
+        return null;
+    }
+
     /**
      * Called to push the next segment.
      */
     /*protected*/ async _read(): Promise<void> {
 
-        if (this.#readActive) {
-            return;
-        }
-
-        this.#readActive = true;
         try {
             this._requestPlaylistUpdate();
 
-            let more = true;
-            while (more) {
-                try {
-                    const result = await this._getSegmentOrWait(this.#next);
+            try {
+                const result = await this._getNextSegment();
+                if (!result) {
+                    this.fetcher.cancel();
+                }
 
-                    this.#current?.abandon();
-
-                    if (!result) {
-                        this.#current = null;
-                        this.push(null);
+                this.push(result);
+            }
+            catch (err: any) {
+                if (this.index) {
+                    if (this.index.master) {
+                        this.push(null);                    // Just ignore any error
                         this.fetcher.cancel();
                         return;
                     }
 
-                    // Apply cross playlist discontinuity
-
-                    if (result.discont) {
-                        result.segment.discontinuity = true;
-                    }
-
-                    this.#current = new HlsReaderObject(result.ptr.msn, result.segment);
-                    this.#next = result.ptr.next();
-
-                    this.#readActive = more = this.push(this.#current);
-
-                    if (result.segment.isPartial()) {
-                        more || (more = !await this._getSegmentOrWait(new SegmentPointer(result.ptr.msn))); // fetch until we have the full segment
+                    if (this.fetcher.isRecoverableUpdateError(err)) {
+                        return;
                     }
                 }
-                catch (err: any) {
-                    if (this.index) {
-                        if (this.index.master) {
-                            this.push(null);                    // Just ignore any error
-                            this.fetcher.cancel();
-                            return;
-                        }
 
-                        if (this.fetcher.isRecoverableUpdateError(err)) {
-                            continue;
-                        }
-                    }
-
-                    throw err;
-                }
+                throw err;
             }
         }
         catch (err: any) {
             this.destroy(err);
         }
-        finally {
-            this.#readActive = false;
-        }
     }
 
     _destroy(err: Error | null, cb: unknown): void {
 
-        this.#current?.abandon();
+        this.#active?.abandon();
+        this.#active = null;
         this.fetcher.cancel();
 
         if (err?.name === 'AbortError') {
