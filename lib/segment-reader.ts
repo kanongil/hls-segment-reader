@@ -133,13 +133,12 @@ export type HlsSegmentReaderOptions = {
 
     /** Emit error if playlist is not updated for `maxStallTime` ms */
     maxStallTime?: number;
-} & HlsPlaylistFetcherOptions;
+} & Omit<HlsPlaylistFetcherOptions, 'onProblem'>;
 
 
 const HlsSegmentReaderEvents = <IHlsSegmentReaderEvents & ReadableEvents<HlsReaderObject>>(null as any);
 interface IHlsSegmentReaderEvents {
     index(index: Readonly<MasterPlaylist | MediaPlaylist>, meta: Readonly<HlsIndexMeta>): void;
-    hints(part?: PartData, map?: PartData): void;
     problem(err: Error): void;
 }
 
