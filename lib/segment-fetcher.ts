@@ -2,9 +2,8 @@ import { assert as hoekAssert } from '@hapi/hoek';
 import { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
 import { Deferred } from 'hls-playlist-reader/lib/helpers';
-import { ReadableEvents, TypedEmitter, TypedReadable } from 'hls-playlist-reader/lib/raw/typed-readable';
 import { HlsIndexMeta, HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader';
-import type { ParsedPlaylist, PartData, PlaylistObject } from 'hls-playlist-reader/lib/fetcher';
+import type { ParsedPlaylist, PlaylistObject } from 'hls-playlist-reader/lib/fetcher';
 
 
 // eslint-disable-next-line func-style
@@ -52,7 +51,7 @@ class UnendingPlaylistFetcher extends HlsPlaylistFetcher {
     }
 }
 
-export class HlsReaderObject {
+export class HlsFetcherObject {
 
     readonly msn: number;
     readonly isClosed: boolean;
@@ -121,7 +120,7 @@ export class HlsReaderObject {
     }
 }
 
-export type HlsSegmentReaderOptions = {
+export type HlsSegmentFetcherOptions = {
     /** Start from first segment, or use stream start */
     fullStream?: boolean;
 
@@ -133,20 +132,16 @@ export type HlsSegmentReaderOptions = {
 
     /** Emit error if playlist is not updated for `maxStallTime` ms */
     maxStallTime?: number;
-} & Omit<HlsPlaylistFetcherOptions, 'onProblem'>;
 
+    onIndex?: (index: Readonly<MasterPlaylist | MediaPlaylist>, meta: Readonly<HlsIndexMeta>) => void;
+} & HlsPlaylistFetcherOptions;
 
-const HlsSegmentReaderEvents = <IHlsSegmentReaderEvents & ReadableEvents<HlsReaderObject>>(null as any);
-interface IHlsSegmentReaderEvents {
-    index(index: Readonly<MasterPlaylist | MediaPlaylist>, meta: Readonly<HlsIndexMeta>): void;
-    problem(err: Error): void;
-}
 
 /**
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, TypedReadable<HlsReaderObject>()) {
+export class HlsSegmentFetcher {
 
     readonly fullStream: boolean;
     startDate?: Date;
@@ -157,15 +152,13 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
 
     #next = new SegmentPointer();
     /** Current partial segment */
-    #active: HlsReaderObject | null = null;
+    #active: HlsFetcherObject | null = null;
     #playlist?: ParsedPlaylist;
     #nextPlaylist = new Deferred<ParsedPlaylist>(true);
     #fetchUpdate = new Deferred<void>();
-    #index?: Readonly<MediaPlaylist | MasterPlaylist>;
+    #cancelled = false;
 
-    constructor(src: string, options: HlsSegmentReaderOptions = {}) {
-
-        super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true });
+    constructor(src: string, options: HlsSegmentFetcherOptions = {}) {
 
         this.fullStream = !!options.fullStream;
 
@@ -175,11 +168,42 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         this.stopDate = options.stopDate ? new Date(options.stopDate) : undefined;
         this.stallAfterMs = options.maxStallTime ?? Infinity;
 
-        const onProblem = (err: Error) => !this.destroyed && this.emit<'problem'>('problem', err);
+        if (options.onProblem) {
+            this.onProblem = options.onProblem;
+        }
 
-        this.fetcher = new (this.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher)(src, { ...options, onProblem });
+        if (options.onIndex) {
+            this.onIndex = options.onIndex;
+        }
 
-        this._feedFetcher(this.fetcher.index()).catch(this.destroy.bind(this));
+        this.fetcher = new (this.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher)(src, { ...options, onProblem: this.onProblem.bind(this) });
+
+        this._feedFetcher(this.fetcher.index()).catch((err) => {
+
+            this.#nextPlaylist.reject(err);
+        });
+    }
+
+    /** Get the next logical segment, waiting if needed or refresh is true */
+    async next({ refresh, timeout }: { refresh?: boolean; timeout?: number } = {}): Promise<HlsFetcherObject | null> {
+
+        const promise = this._requestPlaylistUpdate();
+
+        if (refresh) {
+            await promise;
+        }
+
+        return await this._getNextSegment();
+    }
+
+    protected onProblem(err: Error) {
+
+        err;      // Ignore by default
+    }
+
+    protected onIndex(index: Readonly<MasterPlaylist | MediaPlaylist>, meta: Readonly<HlsIndexMeta>) {
+
+        index; meta;    // Ignore by default
     }
 
     /** Fetch index updates in a loop, as long as there is read() interest */
@@ -211,19 +235,12 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         return this.#nextPlaylist.promise;
     }
 
-    get index(): Readonly<MediaPlaylist | MasterPlaylist> | undefined {
-
-        return this.#index;
-    }
-
     private writeNext(input: Readonly<PlaylistObject>): void {
 
         const { index, playlist, meta } = input;
 
-        this.#index = index;
-
         if (index.master) {
-            this.emit('index', index, meta);
+            this.onIndex(index, meta);
             this.#nextPlaylist.reject(new Error('master playlist'));
             return;
         }
@@ -242,9 +259,9 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
             }
         }
 
-        // Emit updates
+        // Signal update
 
-        this.emit('index', index, meta);
+        this.onIndex(index, meta);
 
         // Signal new playlist is ready
 
@@ -269,7 +286,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                 result.segment.discontinuity = true;
             }
 
-            const obj = new HlsReaderObject(result.ptr.msn, result.segment);
+            const obj = new HlsFetcherObject(result.ptr.msn, result.segment);
             this.#next = result.ptr.next();
 
             if (result.segment.isPartial()) {
@@ -296,54 +313,16 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         return null;
     }
 
-    /**
-     * Called to push the next segment.
-     */
-    /*protected*/ async _read(): Promise<void> {
+    cancel(reason?: Error): void {
 
-        try {
-            this._requestPlaylistUpdate();
-
-            try {
-                const result = await this._getNextSegment();
-                if (!result) {
-                    this.fetcher.cancel();
-                }
-
-                this.push(result);
-            }
-            catch (err: any) {
-                if (this.index) {
-                    if (this.index.master) {
-                        this.push(null);                    // Just ignore any error
-                        this.fetcher.cancel();
-                        return;
-                    }
-
-                    if (this.fetcher.isRecoverableUpdateError(err)) {
-                        return;
-                    }
-                }
-
-                throw err;
-            }
+        if (this.#cancelled) {
+            return;
         }
-        catch (err: any) {
-            this.destroy(err);
-        }
-    }
 
-    _destroy(err: Error | null, cb: unknown): void {
-
+        this.#cancelled = true;
         this.#active?.abandon();
         this.#active = null;
-        this.fetcher.cancel();
-
-        if (err?.name === 'AbortError') {
-            err = null;
-        }
-
-        super._destroy(err, cb as any);
+        this.fetcher.cancel(reason);
     }
 
     // Private methods
@@ -360,7 +339,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
         let playlist = this.#playlist ?? await this._requestPlaylistUpdate();
         let discont = false;
         do {
-            assert(!this.destroyed);
+            assert(!this.#cancelled);
 
             if (ptr.isEmpty()) {
                 ptr = this._initialSegmentPointer(playlist);
@@ -374,7 +353,7 @@ export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, Typed
                     throw new Error('Fatal playlist inconsistency');
                 }
 
-                this.emit<'problem'>('problem', new Error('Playlist jump'));
+                this.onProblem(new Error('Playlist jump'));
 
                 ptr = new SegmentPointer(playlist.index.startMsn(true), this.fetcher.lowLatency ? 0 : undefined);
                 discont = true;
