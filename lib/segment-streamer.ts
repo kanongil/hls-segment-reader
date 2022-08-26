@@ -1,7 +1,7 @@
 
 import type { Readable } from 'stream';
 import type { MasterPlaylist, MediaPlaylist } from 'm3u8parse';
-import type { HlsSegmentReader, HlsReaderObject } from './segment-reader';
+import type { HlsSegmentReader, HlsFetcherObject } from '.';
 import type { FetchResult, Byterange } from 'hls-playlist-reader/lib/helpers';
 
 import { Stream, finished } from 'stream';
@@ -29,7 +29,7 @@ function assert(condition: any, ...args: any[]): asserts condition {
 }
 
 // eslint-disable-next-line func-style
-function assertReaderObject(obj: any, message: string): asserts obj is HlsReaderObject {
+function assertFetcherObject(obj: any, message: string): asserts obj is HlsFetcherObject {
 
     assert(typeof obj.msn === 'number' && obj.entry, message);
 }
@@ -70,13 +70,13 @@ export class HlsStreamerObject {
     type: 'segment' | 'map';
     file: FetchResult['meta'];
     stream?: Readable;
-    segment?: HlsReaderObject;
+    segment?: HlsFetcherObject;
     attrs?: AttrList;
 
     constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'map', details: AttrList);
-    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'segment', details: HlsReaderObject);
+    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'segment', details: HlsFetcherObject);
 
-    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'segment' | 'map', details: HlsReaderObject | AttrList) {
+    constructor(fileMeta: FetchResult['meta'], stream: Readable | undefined, type: 'segment' | 'map', details: HlsFetcherObject | AttrList) {
 
         const isSegment = type === 'segment';
 
@@ -85,7 +85,7 @@ export class HlsStreamerObject {
         this.stream = stream;
 
         if (isSegment) {
-            this.segment = details as HlsReaderObject;
+            this.segment = details as HlsFetcherObject;
         }
         else {
             this.attrs = details as AttrList;
@@ -103,7 +103,7 @@ interface IHlsSegmentStreamerEvents {
     problem(err: Error): void;
 }
 
-export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, TypedTransform<HlsReaderObject, HlsStreamerObject>()) {
+export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, TypedTransform<HlsFetcherObject, HlsStreamerObject>()) {
 
     baseUrl = 'unknown:';
     readonly withData: boolean;
@@ -155,10 +155,10 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
             src.on<'problem'>('problem', this.#onReaderProblem);
 
             if (src.index) {
-                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.fetcher.baseUrl }));
+                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.fetcher.fetcher.baseUrl }));
             }
 
-            this.baseUrl = src.fetcher.baseUrl;
+            this.baseUrl = src.fetcher.fetcher.baseUrl;
         });
 
         this.on('unpipe', () => {
@@ -218,9 +218,9 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         }
     }
 
-    _transform(segment: HlsReaderObject | unknown, _: unknown, done: (err?: Error) => void): void {
+    _transform(segment: HlsFetcherObject | unknown, _: unknown, done: (err?: Error) => void): void {
 
-        assertReaderObject(segment, 'Only segment-reader segments are supported');
+        assertFetcherObject(segment, 'Only segment-reader segments are supported');
 
         this._process(segment).then(() => done(), (err) => {
 
@@ -250,7 +250,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         this.emit<'problem'>('problem', err);
     }
 
-    private async _process(segment: HlsReaderObject): Promise<undefined> {
+    private async _process(segment: HlsFetcherObject): Promise<undefined> {
 
         // Check for new map entry
 

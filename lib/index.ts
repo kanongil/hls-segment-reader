@@ -2,7 +2,7 @@ import { HlsPlaylistReader, HlsPlaylistReaderOptions } from 'hls-playlist-reader
 import { HlsSegmentReader, HlsSegmentReaderOptions } from './segment-reader';
 import { HlsSegmentStreamer, HlsSegmentStreamerOptions } from './segment-streamer';
 
-export { HlsReaderObject } from './segment-reader';
+export { HlsFetcherObject } from './segment-fetcher';
 export type { HlsIndexMeta } from 'hls-playlist-reader';
 export { HlsStreamerObject } from './segment-streamer';
 

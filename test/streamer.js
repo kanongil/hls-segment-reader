@@ -13,7 +13,7 @@ const Uristream = require('uristream');
 const Shared = require('./_shared');
 
 // eslint-disable-next-line @hapi/capitalize-modules
-const { createSimpleReader, HlsSegmentReader, HlsReaderObject, HlsSegmentStreamer } = require('..');
+const { createSimpleReader, HlsSegmentReader, HlsFetcherObject, HlsSegmentStreamer } = require('..');
 
 
 // Declare internals
@@ -138,14 +138,14 @@ describe('HlsSegmentStreamer()', () => {
         })()).to.reject(Error, /Unsupported segment MIME type/);
     });
 
-    describe('writing HlsReaderObjects', () => {
+    describe('writing HlsFetcherObject', () => {
 
         it('works', async () => {
 
             const streamer = new HlsSegmentStreamer({ highWaterMark: 0 });
             const iter = streamer[Symbol.asyncIterator]();
 
-            streamer.write(new HlsReaderObject(0, new MediaSegment({
+            streamer.write(new HlsFetcherObject(0, new MediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
             })));
@@ -168,8 +168,8 @@ describe('HlsSegmentStreamer()', () => {
                 map: new AttrList({ uri: '"data:video/mp2t,MAP"', value: 'OK' })
             });
 
-            streamer.write(new HlsReaderObject(0, segment));
-            streamer.write(new HlsReaderObject(1, segment));
+            streamer.write(new HlsFetcherObject(0, segment));
+            streamer.write(new HlsFetcherObject(1, segment));
             streamer.end();
 
             const segments = [];
@@ -195,12 +195,12 @@ describe('HlsSegmentStreamer()', () => {
                 duration: 2
             });
 
-            streamer.write(new HlsReaderObject(0, segment));
-            streamer.write(new HlsReaderObject(1, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP1"' }) })));
-            streamer.write(new HlsReaderObject(2, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP2"' }) })));
-            streamer.write(new HlsReaderObject(3, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '2@0' }) })));
-            streamer.write(new HlsReaderObject(4, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '3@1' }) })));
-            streamer.write(new HlsReaderObject(5, segment));
+            streamer.write(new HlsFetcherObject(0, segment));
+            streamer.write(new HlsFetcherObject(1, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP1"' }) })));
+            streamer.write(new HlsFetcherObject(2, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP2"' }) })));
+            streamer.write(new HlsFetcherObject(3, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '2@0' }) })));
+            streamer.write(new HlsFetcherObject(4, new MediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '3@1' }) })));
+            streamer.write(new HlsFetcherObject(5, segment));
             streamer.end();
 
             const segments = [];
@@ -228,7 +228,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer();
             const iter = streamer[Symbol.asyncIterator]();
 
-            const segment = new HlsReaderObject(0, new MediaSegment({
+            const segment = new HlsFetcherObject(0, new MediaSegment({
                 parts: [new AttrList(), new AttrList()]
             }));
 
@@ -237,7 +237,7 @@ describe('HlsSegmentStreamer()', () => {
                 segment.closed = function () {
 
                     process.nextTick(resolve, 'closed');
-                    return HlsReaderObject.prototype.closed.call(this);
+                    return HlsFetcherObject.prototype.closed.call(this);
                 };
             });
 
@@ -264,7 +264,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer();
             const iter = streamer[Symbol.asyncIterator]();
 
-            const segment = new HlsReaderObject(0, new MediaSegment({
+            const segment = new HlsFetcherObject(0, new MediaSegment({
                 parts: [new AttrList()]
             }));
 
@@ -273,7 +273,7 @@ describe('HlsSegmentStreamer()', () => {
                 segment.closed = function () {
 
                     process.nextTick(resolve, 'closed');
-                    return HlsReaderObject.prototype.closed.call(this);
+                    return HlsFetcherObject.prototype.closed.call(this);
                 };
             });
 
@@ -299,7 +299,7 @@ describe('HlsSegmentStreamer()', () => {
             const streamer = new HlsSegmentStreamer();
             const iter = streamer[Symbol.asyncIterator]();
 
-            const segment = new HlsReaderObject(0, new MediaSegment({
+            const segment = new HlsFetcherObject(0, new MediaSegment({
                 parts: [new AttrList()]
             }));
 
@@ -308,12 +308,12 @@ describe('HlsSegmentStreamer()', () => {
                 segment.closed = function () {
 
                     process.nextTick(resolve, 'closed');
-                    return HlsReaderObject.prototype.closed.call(this);
+                    return HlsFetcherObject.prototype.closed.call(this);
                 };
             });
 
             streamer.write(segment);
-            streamer.write(new HlsReaderObject(1, new MediaSegment({
+            streamer.write(new HlsFetcherObject(1, new MediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
             })));
@@ -405,9 +405,12 @@ describe('HlsSegmentStreamer()', () => {
             const reader = new HlsSegmentReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'));
             const streamer = new HlsSegmentStreamer(reader, { withData: false, highWaterMark: 0 });
 
+            //console.log('S START')
             for await (const obj of streamer) {
+                //console.log('S OBJ', streamer.readableLength)
                 expect(obj).to.exist();
                 await Hoek.wait(20);
+                //console.log('S WAITED', streamer.readableLength)
                 expect(streamer.readableLength).to.equal(0);
             }
         });
@@ -494,8 +497,8 @@ describe('HlsSegmentStreamer()', () => {
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, readerOptions);
             const streamer = new HlsSegmentStreamer(reader, { fullStream: false, withData: true, ...readerOptions });
 
-            reader.fetcher._intervals = [];
-            reader.fetcher.getUpdateInterval = function (...args) {
+            reader.fetcher.fetcher._intervals = [];
+            reader.fetcher.fetcher.getUpdateInterval = function (...args) {
 
                 this._intervals.push(HlsPlaylistFetcher.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;

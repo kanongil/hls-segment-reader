@@ -234,8 +234,8 @@ describe('HlsSegmentReader()', () => {
         const prepareLiveReader = function (readerOptions = {}, state = {}) {
 
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
-            reader.fetcher._intervals = [];
-            reader.fetcher.getUpdateInterval = function (...args) {
+            reader.fetcher.fetcher._intervals = [];
+            reader.fetcher.fetcher.getUpdateInterval = function (...args) {
 
                 this._intervals.push(HlsPlaylistFetcher.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;
@@ -352,7 +352,7 @@ describe('HlsSegmentReader()', () => {
 
             const closeEvent = Events.once(reader, 'close');
 
-            const playlist = await reader._requestPlaylistUpdate();
+            const playlist = await reader.fetcher._requestPlaylistUpdate();
             expect(playlist).to.exist();
 
             reader.destroy();
@@ -504,7 +504,7 @@ describe('HlsSegmentReader()', () => {
 
                 state.firstMsn += 5;
 
-                await Hoek.wait(20);
+                await Hoek.wait(5);
             }
 
             expect(segments).to.have.length(20);
@@ -620,10 +620,11 @@ describe('HlsSegmentReader()', () => {
                 });
 
                 const errors = [];
-                reader.fetcher.isRecoverableUpdateError = function (err) {
+                const orig = reader.fetcher.fetcher.isRecoverableUpdateError;
+                reader.fetcher.fetcher.isRecoverableUpdateError = function (err) {
 
                     errors.push(err);
-                    return HlsPlaylistFetcher.prototype.isRecoverableUpdateError.call(reader, err);
+                    return orig.call(reader.fetcher.fetcher, err);
                 };
 
                 const segments = [];
