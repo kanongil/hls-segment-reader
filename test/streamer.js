@@ -497,8 +497,8 @@ describe('HlsSegmentStreamer()', () => {
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, readerOptions);
             const streamer = new HlsSegmentStreamer(reader, { fullStream: false, withData: true, ...readerOptions });
 
-            reader.fetcher.fetcher._intervals = [];
-            reader.fetcher.fetcher.getUpdateInterval = function (...args) {
+            reader.fetcher.source._intervals = [];
+            reader.fetcher.source.getUpdateInterval = function (...args) {
 
                 this._intervals.push(HlsPlaylistFetcher.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;

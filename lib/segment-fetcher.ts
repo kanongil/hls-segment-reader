@@ -148,7 +148,7 @@ export class HlsSegmentFetcher {
     stopDate?: Date;
     stallAfterMs: number;
 
-    readonly fetcher: HlsPlaylistFetcher;
+    readonly source: HlsPlaylistFetcher;
 
     #next = new SegmentPointer();
     /** Current partial segment */
@@ -157,6 +157,7 @@ export class HlsSegmentFetcher {
     #nextPlaylist = new Deferred<ParsedPlaylist>(true);
     #fetchUpdate = new Deferred<void>();
     #cancelled = false;
+    #pending = false;
 
     constructor(src: string, options: HlsSegmentFetcherOptions = {}) {
 
@@ -176,25 +177,52 @@ export class HlsSegmentFetcher {
             this.onIndex = options.onIndex;
         }
 
-        this.fetcher = new (this.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher)(src, { ...options, onProblem: this.onProblem.bind(this) });
+        this.source = new (this.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher)(src, { ...options, onProblem: this.onProblem.bind(this) });
+    }
 
-        this._feedFetcher(this.fetcher.index()).catch((err) => {
+    // Public API
+
+    /** Start fetching, returning the initial index */
+    start(): Promise<Readonly<MasterPlaylist | MediaPlaylist>> {
+
+        const promise = this.source.index();
+        this._feedFetcher(promise).catch((err) => {
 
             this.#nextPlaylist.reject(err);
         });
+
+        return promise.then((obj) => obj.index);
     }
 
     /** Get the next logical segment, waiting if needed or refresh is true */
-    async next({ refresh, timeout }: { refresh?: boolean; timeout?: number } = {}): Promise<HlsFetcherObject | null> {
+    next({ refresh }: { refresh?: boolean } = {}): Promise<HlsFetcherObject | null> {
+
+        assert(!this.#cancelled, 'Fetcher is cancelled');
+        assert(!this.#pending, 'Next segment is already being fetched');
 
         const promise = this._requestPlaylistUpdate();
+        const ready = refresh ? promise : Promise.resolve();
+        this.#pending = true;
 
-        if (refresh) {
-            await promise;
+        return ready
+            .then(() => this._getNextSegment())
+            // eslint-disable-next-line no-return-assign
+            .finally(() => this.#pending = false);
+    }
+
+    cancel(reason?: Error): void {
+
+        if (this.#cancelled) {
+            return;
         }
 
-        return await this._getNextSegment();
+        this.#cancelled = true;
+        this.#active?.abandon();
+        this.#active = null;
+        this.source.cancel(reason);
     }
+
+    // Overrideable hooks
 
     protected onProblem(err: Error) {
 
@@ -206,21 +234,23 @@ export class HlsSegmentFetcher {
         index; meta;    // Ignore by default
     }
 
-    /** Fetch index updates in a loop, as long as there is read() interest */
+    // Private methods
+
+    /** Fetch index updates in a loop, as long as there is next() interest */
     private async _feedFetcher(initial: Promise<PlaylistObject>) {
 
         const obj = await initial;
         this.writeNext(obj);
 
-        while (this.fetcher.canUpdate()) {
+        while (this.source.canUpdate()) {
 
-            // Wait until there has been at least one new read() to automatically stop fetching when not actively used
+            // Wait until there has been at least one new next() call, to automatically stop fetching when not actively used
 
             if (!this.#active) {
                 await this.#fetchUpdate.promise;
             }
 
-            const update = await this.fetcher.update({ timeout: this.stallAfterMs });
+            const update = await this.source.update({ timeout: this.stallAfterMs });
             this.writeNext(update);
         }
     }
@@ -313,20 +343,6 @@ export class HlsSegmentFetcher {
         return null;
     }
 
-    cancel(reason?: Error): void {
-
-        if (this.#cancelled) {
-            return;
-        }
-
-        this.#cancelled = true;
-        this.#active?.abandon();
-        this.#active = null;
-        this.fetcher.cancel(reason);
-    }
-
-    // Private methods
-
     /**
      * @argument ptr - The segment to look for. Should be within current playlist range, or 1 msn ahead of it.
      *
@@ -345,7 +361,7 @@ export class HlsSegmentFetcher {
                 ptr = this._initialSegmentPointer(playlist);
             }
             else if ((ptr.msn < playlist.index.startMsn(true)) ||
-                     (ptr.msn > (playlist.index.lastMsn(this.fetcher.lowLatency) + 1))) {
+                     (ptr.msn > (playlist.index.lastMsn(this.source.lowLatency) + 1))) {
 
                 // Playlist jump
 
@@ -355,7 +371,7 @@ export class HlsSegmentFetcher {
 
                 this.onProblem(new Error('Playlist jump'));
 
-                ptr = new SegmentPointer(playlist.index.startMsn(true), this.fetcher.lowLatency ? 0 : undefined);
+                ptr = new SegmentPointer(playlist.index.startMsn(true), this.source.lowLatency ? 0 : undefined);
                 discont = true;
             }
 
@@ -388,13 +404,13 @@ export class HlsSegmentFetcher {
         if (!this.fullStream && this.startDate) {
             const msn = playlist.index.msnForDate(this.startDate, true);
             if (msn >= 0) {
-                return new SegmentPointer(msn, this.fetcher.lowLatency ? 0 : undefined);
+                return new SegmentPointer(msn, this.source.lowLatency ? 0 : undefined);
             }
 
             // no date information in index
         }
 
-        if (this.fetcher.lowLatency && playlist.serverControl.partHoldBack) {
+        if (this.source.lowLatency && playlist.serverControl.partHoldBack) {
             let partHoldBack = playlist.serverControl.partHoldBack;
             let msn = playlist.index.lastMsn(true);
             let segment;
@@ -421,6 +437,6 @@ export class HlsSegmentFetcher {
 
         // TODO: use start offset, when present
 
-        return new SegmentPointer(playlist.index.startMsn(this.fullStream), this.fetcher.lowLatency ? 0 : undefined);
+        return new SegmentPointer(playlist.index.startMsn(this.fullStream), this.source.lowLatency ? 0 : undefined);
     }
 }

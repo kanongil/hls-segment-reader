@@ -234,8 +234,8 @@ describe('HlsSegmentReader()', () => {
         const prepareLiveReader = function (readerOptions = {}, state = {}) {
 
             const reader = new HlsSegmentReader(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
-            reader.fetcher.fetcher._intervals = [];
-            reader.fetcher.fetcher.getUpdateInterval = function (...args) {
+            reader.fetcher.source._intervals = [];
+            reader.fetcher.source.getUpdateInterval = function (...args) {
 
                 this._intervals.push(HlsPlaylistFetcher.prototype.getUpdateInterval.call(this, ...args));
                 return undefined;
@@ -620,11 +620,11 @@ describe('HlsSegmentReader()', () => {
                 });
 
                 const errors = [];
-                const orig = reader.fetcher.fetcher.isRecoverableUpdateError;
-                reader.fetcher.fetcher.isRecoverableUpdateError = function (err) {
+                const orig = reader.fetcher.source.isRecoverableUpdateError;
+                reader.fetcher.source.isRecoverableUpdateError = function (err) {
 
                     errors.push(err);
-                    return orig.call(reader.fetcher.fetcher, err);
+                    return orig.call(reader.fetcher.source, err);
                 };
 
                 const segments = [];

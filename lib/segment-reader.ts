@@ -21,36 +21,24 @@ interface IHlsSegmentReaderEvents {
  */
 export class HlsSegmentReader extends TypedEmitter(HlsSegmentReaderEvents, TypedReadable<HlsFetcherObject>()) {
 
-    readonly fullStream: boolean;
-    startDate?: Date;
-    stopDate?: Date;
-    stallAfterMs: number;
-
     readonly fetcher: HlsSegmentFetcher;
-
-    index?: Readonly<MediaPlaylist | MasterPlaylist>;
+    readonly index?: Readonly<MediaPlaylist | MasterPlaylist>;
 
     constructor(src: string, options: HlsSegmentReaderOptions = {}) {
 
         super({ objectMode: true, highWaterMark: 0, autoDestroy: true, emitClose: true });
-
-        this.fullStream = !!options.fullStream;
-
-        // Dates are inclusive
-
-        this.startDate = options.startDate ? new Date(options.startDate) : undefined;
-        this.stopDate = options.stopDate ? new Date(options.stopDate) : undefined;
-        this.stallAfterMs = options.maxStallTime ?? Infinity;
 
         this.fetcher = new HlsSegmentFetcher(src, {
             ...options,
             onProblem: (err) => !this.destroyed && this.emit<'problem'>('problem', err),
             onIndex: (index, meta) => {
 
-                this.index = index;
+                (<{ index: Readonly<MediaPlaylist | MasterPlaylist> }> this).index = index;
                 this.emit('index', index, meta);
             }
         });
+
+        this.fetcher.start().catch(this.destroy.bind(this));
     }
 
     /**

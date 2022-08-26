@@ -155,10 +155,10 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
             src.on<'problem'>('problem', this.#onReaderProblem);
 
             if (src.index) {
-                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.fetcher.fetcher.baseUrl }));
+                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.fetcher.source.baseUrl }));
             }
 
-            this.baseUrl = src.fetcher.fetcher.baseUrl;
+            this.baseUrl = src.fetcher.source.baseUrl;
         });
 
         this.on('unpipe', () => {
