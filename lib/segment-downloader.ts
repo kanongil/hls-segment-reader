@@ -4,9 +4,9 @@ import type { Byterange } from 'hls-playlist-reader/lib/helpers';
 import { finished } from 'stream';
 import { promisify } from 'util';
 
-import { applyToDefaults, assert } from '@hapi/hoek';
+import { applyToDefaults } from '@hapi/hoek';
 
-import { performFetch } from 'hls-playlist-reader/lib/helpers';
+import { assert, performFetch } from 'hls-playlist-reader/lib/helpers';
 
 
 const internals = {
@@ -17,7 +17,6 @@ const internals = {
 };
 
 
-// eslint-disable-next-line @typescript-eslint/ban-types
 type FetchToken = object | string | number;
 
 export class SegmentDownloader {
@@ -42,10 +41,8 @@ export class SegmentDownloader {
 
     /**
      * Stops any fetch not in token list
-     *
-     * @param {Set<FetchToken>} tokens
      */
-    setValid(tokens = new Set()): void {
+    setValid(tokens = new Set<FetchToken>()): void {
 
         for (const [token, fetch] of this.#fetches) {
 

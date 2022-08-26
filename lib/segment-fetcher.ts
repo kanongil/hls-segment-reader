@@ -1,16 +1,9 @@
-import { assert as hoekAssert } from '@hapi/hoek';
-import { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
-
-import { Deferred } from 'hls-playlist-reader/lib/helpers';
-import { HlsIndexMeta, HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader';
 import type { ParsedPlaylist, PlaylistObject } from 'hls-playlist-reader/lib/fetcher';
 
+import { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
-// eslint-disable-next-line func-style
-function assert(condition: any, ...args: any[]): asserts condition {
-
-    hoekAssert(condition, ...args);
-}
+import { HlsIndexMeta, HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader';
+import { assert, Deferred } from 'hls-playlist-reader/lib/helpers';
 
 
 class SegmentPointer {

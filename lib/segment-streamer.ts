@@ -7,13 +7,13 @@ import type { FetchResult, Byterange } from 'hls-playlist-reader/lib/helpers';
 import { Stream, finished } from 'stream';
 import { URL } from 'url';
 
-import { assert as hoekAssert } from '@hapi/hoek';
 import { AttrList } from 'm3u8parse';
-
+import { types as MimeTypes } from 'mime-types';
 import { DuplexEvents, TypedEmitter, TypedTransform } from 'hls-playlist-reader/lib/raw/typed-readable';
+import { assert } from 'hls-playlist-reader/lib/helpers';
+
 import { SegmentDownloader } from './segment-downloader';
 
-import { types as MimeTypes } from 'mime-types';
 
 /* eslint-disable @typescript-eslint/dot-notation */
 MimeTypes['ac3'] = 'audio/ac3';
@@ -21,12 +21,6 @@ MimeTypes['eac3'] = 'audio/eac3';
 MimeTypes['m4s'] = 'video/iso.segment';
 /* eslint-enable @typescript-eslint/dot-notation */
 
-
-// eslint-disable-next-line func-style
-function assert(condition: any, ...args: any[]): asserts condition {
-
-    hoekAssert(condition, ...args);
-}
 
 // eslint-disable-next-line func-style
 function assertFetcherObject(obj: any, message: string): asserts obj is HlsFetcherObject {
@@ -323,14 +317,14 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
             if (this.#reader && fetch.meta.modified) {
                 const segmentTime = segment.entry.program_time || new Date(+fetch.meta.modified - (segment.entry.duration || 0) * 1000);
 
-                if (!this.#started && this.#reader.startDate &&
-                    segmentTime < this.#reader.startDate) {
+                if (!this.#started && this.#reader.fetcher.startDate &&
+                    segmentTime < this.#reader.fetcher.startDate) {
 
                     return;   // Too early - ignore segment
                 }
 
-                if (this.#reader.stopDate &&
-                    segmentTime > this.#reader.stopDate) {
+                if (this.#reader.fetcher.stopDate &&
+                    segmentTime > this.#reader.fetcher.stopDate) {
 
                     this.push(null);
                     return;
