@@ -1,5 +1,7 @@
 import type { ParsedPlaylist, PlaylistObject } from 'hls-playlist-reader/lib/fetcher';
 
+import { URL } from 'url';
+
 import { MediaPlaylist, MasterPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
 import { HlsIndexMeta, HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader';
@@ -152,7 +154,7 @@ export class HlsSegmentFetcher {
     #cancelled = false;
     #pending = false;
 
-    constructor(src: string, options: HlsSegmentFetcherOptions = {}) {
+    constructor(src: string | URL, options: HlsSegmentFetcherOptions = {}) {
 
         this.fullStream = !!options.fullStream;
 

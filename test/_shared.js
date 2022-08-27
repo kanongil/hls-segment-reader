@@ -53,6 +53,15 @@ exports.provisionServer = () => {
         }
     });
 
+    server.ext('onRequest', (request, h) => {
+
+        if (server.onRequest) {
+            server.onRequest(request);
+        }
+
+        return h.continue;
+    });
+
     return server;
 };
 
@@ -131,29 +140,21 @@ exports.provisionLiveServer = function (shared) {
 };
 
 
-exports.readSegments = (Class, ...args) => {
+exports.readSegments = async (Class, ...args) => {
 
-    let r;
-    const promise = new Promise((resolve, reject) => {
+    /** @type { ReadableStream<unknown> } */
+    const r = new Class(...args);
+    const reader = r.getReader();
+    const segments = [];
 
-        r = new Class(...args);
-        r.on('error', reject);
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+            return segments;
+        }
 
-        const segments = [];
-        r.on('data', (segment) => {
-
-            segments.push(segment);
-        });
-
-        r.on('end', () => {
-
-            resolve(segments);
-        });
-    });
-
-    promise.reader = r;
-
-    return promise;
+        segments.push(value);
+    }
 };
 
 
