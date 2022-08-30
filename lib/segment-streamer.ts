@@ -1,15 +1,13 @@
 
 import type { Readable } from 'stream';
-import type { MasterPlaylist, MediaPlaylist } from 'm3u8parse';
-import type { HlsSegmentReader, HlsFetcherObject } from '.';
+import type { MediaPlaylist } from 'm3u8parse';
+import type { HlsSegmentReadable, HlsFetcherObject } from '.';
 import type { FetchResult, Byterange } from 'hls-playlist-reader/lib/helpers';
 
-import { Stream, finished } from 'stream';
-import { URL } from 'url';
+import { finished } from 'stream';
 
 import { AttrList } from 'm3u8parse';
 import { types as MimeTypes } from 'mime-types';
-import { DuplexEvents, TypedEmitter, TypedTransform } from 'hls-playlist-reader/lib/raw/typed-readable';
 import { assert } from 'hls-playlist-reader/lib/helpers';
 
 import { SegmentDownloader } from './segment-downloader';
@@ -20,13 +18,6 @@ MimeTypes['ac3'] = 'audio/ac3';
 MimeTypes['eac3'] = 'audio/eac3';
 MimeTypes['m4s'] = 'video/iso.segment';
 /* eslint-enable @typescript-eslint/dot-notation */
-
-
-// eslint-disable-next-line func-style
-function assertFetcherObject(obj: any, message: string): asserts obj is HlsFetcherObject {
-
-    assert(typeof obj.msn === 'number' && obj.entry, message);
-}
 
 
 const internals = {
@@ -92,12 +83,8 @@ export type HlsSegmentStreamerOptions = {
     highWaterMark?: number;
 };
 
-const HlsSegmentStreamerEvents = <IHlsSegmentStreamerEvents & DuplexEvents<HlsStreamerObject>>(null as any);
-interface IHlsSegmentStreamerEvents {
-    problem(err: Error): void;
-}
 
-export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, TypedTransform<HlsFetcherObject, HlsStreamerObject>()) {
+export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsStreamerObject> {
 
     baseUrl = 'unknown:';
     readonly withData: boolean;
@@ -115,66 +102,50 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
     #active = new Map<number, FetchResult>(); // used to stop buffering on expired segments
     #downloader: SegmentDownloader;
-    #reader?: HlsSegmentReader;
+    reader: HlsSegmentReadable;
     #started = false;
 
-    #onReaderIndex = this._onReaderIndex.bind(this);
-    #onReaderProblem = this._onReaderProblem.bind(this);
+    readonly transforms = 0;
+    destroyed = false; // TODO: fix
 
-    constructor(reader?: HlsSegmentReader, options: HlsSegmentStreamerOptions = {}) {
-
-        super({ objectMode: true, allowHalfOpen: false, autoDestroy: false, writableHighWaterMark: 0, readableHighWaterMark: (reader as any)?.highWaterMark ?? options.highWaterMark ?? 0 });
-
-        // autoDestroy is broken for transform streams on node 14, so we need to manually emit 'close' after 'end'
-        // Don't actually call destroy(), since it will trigger an abort() that aborts all tracked segment fetches
-
-        this.on('end', () => process.nextTick(() => this.emit('close')));
-
-        if (typeof reader === 'object' && !(reader instanceof Stream)) {
-            options = reader;
-            reader = undefined;
-        }
+    constructor(reader: HlsSegmentReadable, options: HlsSegmentStreamerOptions = {}) {
 
         this.withData = options.withData ?? true;
 
         this.#downloader = new SegmentDownloader({ probe: !this.withData });
+        this.reader = reader;
+    }
 
-        this.on('pipe', (src: HlsSegmentReader) => {
+    start(controller: TransformStreamDefaultController) {
 
-            assert(!this.#reader, 'Only one piped source is supported');
-            assert(!src.index?.master, 'Source cannot be based on a master playlist');
+        return this.reader.fetch.source.index().then(({ index, meta }) => {
 
-            this.#reader = src;
-            src.on<'index'>('index', this.#onReaderIndex);
-            src.on<'problem'>('problem', this.#onReaderProblem);
+            assert(!index?.master, 'Source cannot be based on a master playlist');
 
-            if (src.index) {
-                process.nextTick(this._onReaderIndex.bind(this, src.index, { url: src.fetcher.source.baseUrl }));
+            this.baseUrl = meta.url;
+        });
+    }
+
+    async transform(chunk: HlsFetcherObject, controller: TransformStreamDefaultController) {
+
+        ++(<{ transforms: number }> this).transforms;
+        try {
+            await this._process(chunk, controller);
+        }
+        catch (err: any) {
+            if (!internals.isAbortedError(err)) {
+                throw err;
             }
-
-            this.baseUrl = src.fetcher.source.baseUrl;
-        });
-
-        this.on('unpipe', () => {
-
-            this.#reader?.off<'index'>('index', this.#onReaderIndex);
-            this.#reader?.off<'problem'>('problem', this.#onReaderProblem);
-            this.#reader = undefined;
-        });
-
-        // Pipe to self
-
-        if (reader) {
-            reader.on('error', (err) => {
-
-                if (!this.destroyed) {
-                    this.destroy(err);
-                }
-            }).pipe(this);
         }
     }
 
-    abort(graceful = false): void {
+    flush(controller: TransformStreamDefaultController) {
+
+        this.destroyed = true;
+    }
+
+
+    /*abort(graceful = false): void {
 
         if (!graceful) {
             this.#downloader.setValid();
@@ -185,18 +156,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         }
 
         this.push(null);
-    }
-
-    _destroy(err: Error | null, cb: unknown): void {
-
-        if (this.#reader && !this.#reader.destroyed) {
-            this.#reader.destroy(err || undefined);
-        }
-
-        super._destroy(err, cb as any);
-
-        this.abort(!!err);
-    }
+    }*/
 
     get segmentMimeTypes(): Set<string> {
 
@@ -212,39 +172,9 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         }
     }
 
-    _transform(segment: HlsFetcherObject | unknown, _: unknown, done: (err?: Error) => void): void {
-
-        assertFetcherObject(segment, 'Only segment-reader segments are supported');
-
-        this._process(segment).then(() => done(), (err) => {
-
-            done(internals.isAbortedError(err) ? undefined : err);
-        });
-    }
-
     // Private methods
 
-    protected _onReaderIndex(index: Readonly<MediaPlaylist | MasterPlaylist>, { url }: { url: string }): void {
-
-        this.baseUrl = url;
-
-        if (index.master) {
-            this.destroy(new Error('The reader source is a master playlist'));
-            return;
-        }
-
-        // Update active token list
-
-        this._updateTokens(index);
-        this.#downloader.setValid(this.#readState.activeTokens);
-    }
-
-    protected _onReaderProblem(err: Error): void {
-
-        this.emit<'problem'>('problem', err);
-    }
-
-    private async _process(segment: HlsFetcherObject): Promise<undefined> {
+    private async _process(segment: HlsFetcherObject, controller: TransformStreamDefaultController): Promise<undefined> {
 
         // Check for new map entry
 
@@ -275,7 +205,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
                             throw err;
                         }
 
-                        this.emit('problem', new Error('Failed to fetch map: ' + err.message));
+                        //this.emit('problem', new Error('Failed to fetch map: ' + err.message));
 
                         // delay and retry
 
@@ -285,14 +215,14 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
                 } while (!fetch);
 
                 assert(!this.destroyed, 'destroyed');
-                this.push(new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment.entry.map));
+                controller.enqueue(new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment.entry.map));
 
                 // It is a fatal inconsistency error, if the map stream fails to download
 
                 if (fetch.stream) {
                     fetch.stream.on('error', (err) => {
 
-                        this.destroy(new Error('Failed to download map data: ' + err.message));
+                        controller.error(new Error('Failed to download map data: ' + err.message));
                     });
                 }
             }
@@ -314,19 +244,19 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         try {
             // Check meta
 
-            if (this.#reader && fetch.meta.modified) {
+            if (this.reader && fetch.meta.modified) {
                 const segmentTime = segment.entry.program_time || new Date(+fetch.meta.modified - (segment.entry.duration || 0) * 1000);
 
-                if (!this.#started && this.#reader.fetcher.startDate &&
-                    segmentTime < this.#reader.fetcher.startDate) {
+                if (!this.#started && this.reader.fetch.startDate &&
+                    segmentTime < this.reader.fetch.startDate) {
 
                     return;   // Too early - ignore segment
                 }
 
-                if (this.#reader.fetcher.stopDate &&
-                    segmentTime > this.#reader.fetcher.stopDate) {
+                if (this.reader.fetch.stopDate &&
+                    segmentTime > this.reader.fetch.stopDate) {
 
-                    this.push(null);
+                    controller.terminate();
                     return;
                 }
             }
@@ -338,7 +268,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
                 finished(stream, () => this.#active.delete(segment.msn));
             }
 
-            this.push(new HlsStreamerObject(fetch.meta, stream, 'segment', segment));
+            controller.enqueue(new HlsStreamerObject(fetch.meta, stream, 'segment', segment));
             stream = undefined; // Don't destroy
 
             this.#started = true;
@@ -376,7 +306,7 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
         return msn; // TODO: handle start over – add generation
     }
 
-    private _updateTokens(index: Readonly<MediaPlaylist>) {
+    indexUpdate(index: Readonly<MediaPlaylist>) {
 
         const old = this.#readState.indexTokens;
 
@@ -399,5 +329,48 @@ export class HlsSegmentStreamer extends TypedEmitter(HlsSegmentStreamerEvents, T
 
         this.#readState.indexTokens = current;
         this.#readState.activeTokens = new Set([...old, ...current]);
+
+        this.#downloader.setValid(this.#readState.activeTokens);
+    }
+}
+
+export class HlsSegmentStreamer extends TransformStream {
+
+    source: HlsSegmentDataSource;
+
+    constructor(reader: HlsSegmentReadable, options: HlsSegmentStreamerOptions = {}) {
+
+        assert(reader, 'A reader is required');
+
+        let source;
+        super(
+            source = new HlsSegmentDataSource(reader, options),
+            new CountQueuingStrategy({ highWaterMark: 1 }),
+            new CountQueuingStrategy({ highWaterMark: options.highWaterMark ?? 0 })
+        );
+
+        this.source = source;
+
+        reader.pipeThrough(this);
+
+        this.handleIndexUpdate().catch(() => undefined);
+    }
+
+    protected async handleIndexUpdate(): Promise<void> {
+
+        const { index } = await this.source.reader.fetch.source.next();
+
+        if (index.master) {
+            this.source.reader.cancel(new Error('The reader source is a master playlist'));
+            return;
+        }
+
+        // Update active token list
+
+        this.source.indexUpdate(index);
+
+        // Wait for next update
+
+        return this.handleIndexUpdate();
     }
 }

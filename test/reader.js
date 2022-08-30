@@ -48,7 +48,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('creates a valid object', async () => {
 
-            const r = new HlsSegmentReadable('http://localhost:' + server.info.port + '/simple/500.m3u8');
+            const r = new HlsSegmentReadable('http://127.0.0.1:' + server.info.port + '/simple/500.m3u8');
 
             expect(r).to.be.instanceOf(HlsSegmentReadable);
 
@@ -80,14 +80,14 @@ describe('HlsSegmentReadable()', () => {
 
         it('does not output any segments', async () => {
 
-            const segments = await readSegments(`http://localhost:${server.info.port}/simple/index.m3u8`);
+            const segments = await readSegments(`http://127.0.0.1:${server.info.port}/simple/index.m3u8`);
             expect(segments).to.have.length(0);
         });
 
         it('calls "onIndex" hook', async () => {
 
             let remoteIndex;
-            const segments = await readSegments(`http://localhost:${server.info.port}/simple/index.m3u8`, {
+            const segments = await readSegments(`http://127.0.0.1:${server.info.port}/simple/index.m3u8`, {
                 onIndex(index) {
 
                     remoteIndex = index;
@@ -105,7 +105,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('outputs all segments', async () => {
 
-            const segments = await readSegments(`http://localhost:${server.info.port}/simple/500.m3u8`);
+            const segments = await readSegments(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`);
 
             expect(segments.length).to.equal(3);
             for (let i = 0; i < segments.length; ++i) {
@@ -116,7 +116,7 @@ describe('HlsSegmentReadable()', () => {
         it('emits the "index" event before first read returns', async () => {
 
             const deferred = new Deferred();
-            const readable = new HlsSegmentReadable(`http://localhost:${server.info.port}/simple/500.m3u8`, {
+            const readable = new HlsSegmentReadable(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`, {
                 onIndex() {
 
                     deferred.resolve('index');
@@ -131,7 +131,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('supports the startDate option', async () => {
 
-            const r = new HlsSegmentReadable(`http://localhost:${server.info.port}/simple/500.m3u8`, { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = new HlsSegmentReadable(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`, { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
             const segments = [];
 
             for await (const segment of r) {
@@ -144,7 +144,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('supports the stopDate option', async () => {
 
-            const r = new HlsSegmentReadable(`http://localhost:${server.info.port}/simple/500.m3u8`, { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = new HlsSegmentReadable(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`, { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
             const segments = [];
 
             for await (const segment of r) {
@@ -251,7 +251,7 @@ describe('HlsSegmentReadable()', () => {
 
         const prepareLiveReader = function (readerOptions = {}, state = {}) {
 
-            const reader = new HlsSegmentReadable(`http://localhost:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
+            const reader = new HlsSegmentReadable(`http://127.0.0.1:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
             reader.fetch.source._intervals = [];
             reader.fetch.source.getUpdateInterval = function (...args) {
 
