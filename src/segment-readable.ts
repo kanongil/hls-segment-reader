@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import { HlsFetcherObject, HlsSegmentFetcher, HlsSegmentFetcherOptions } from './segment-fetcher';
+import { HlsFetcherObject, HlsSegmentFetcher, HlsSegmentFetcherOptions } from './segment-fetcher.js';
 
 
 export type HlsSegmentReaderOptions = HlsSegmentFetcherOptions;

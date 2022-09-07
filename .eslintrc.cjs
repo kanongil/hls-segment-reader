@@ -26,9 +26,7 @@ const typescript = function (project, files) {
         extends: [
             'plugin:@typescript-eslint/recommended'
         ],
-        parser: '@typescript-eslint/parser',
         parserOptions: {
-            sourceType: 'module',
             project,
             tsconfigRootDir: __dirname
         },
@@ -52,15 +50,12 @@ module.exports = {
         'plugin:@hapi/recommended',
         'plugin:@typescript-eslint/eslint-recommended'
     ],
-    plugins: [
-        '@typescript-eslint'
-    ],
     parserOptions: {
-        ecmaVersion: 2020
+        ecmaVersion: 2022
     },
-    ignorePatterns: ['/lib/*.js', '/lib/*.d.ts'],
+    ignorePatterns: ['/lib/*.js', '**/*.d.ts', '/test/*.js', '/test/fixtures/**'],
     overrides: [
-        typescript('./tsconfig.json', ['lib/**/*.ts']),
+        typescript('./src/tsconfig.json', ['src/**/*.ts']),
         typescript('./test/tsconfig.json', ['test/*.ts'])
     ]
 };

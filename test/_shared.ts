@@ -1,28 +1,26 @@
-'use strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { Readable } from 'stream';
 
-const Fs = require('fs');
-const Path = require('path');
-const Readable = require('stream').Readable;
-
-const Hapi = require('@hapi/hapi');
-const Hoek = require('@hapi/hoek');
-const Inert = require('@hapi/inert');
-const Joi = require('joi');
-const M3U8Parse = require('m3u8parse');
+import { Server } from '@hapi/hapi';
+import { wait, ignore } from '@hapi/hoek';
+import Inert from '@hapi/inert';
+import { object, number } from 'joi';
+import { AttrList, MediaPlaylist } from 'm3u8parse';
 
 
-exports.provisionServer = () => {
+export function provisionServer() {
 
-    const server = new Hapi.Server({
+    const server = new Server({
         host: '127.0.0.1',
-        routes: { files: { relativeTo: Path.join(__dirname, 'fixtures') } }
+        routes: { files: { relativeTo: join(__dirname, 'fixtures') } }
     });
 
     server.register(Inert);
 
     const delay = async (request, h) => {
 
-        await Hoek.wait(200);
+        await wait(200);
 
         return 200;
     };
@@ -32,8 +30,8 @@ exports.provisionServer = () => {
         const slowStream = new Readable();
         slowStream._read = () => { };
 
-        const path = Path.join(__dirname, 'fixtures', request.params.path);
-        const buffer = Fs.readFileSync(path);
+        const path = join(__dirname, 'fixtures', request.params.path);
+        const buffer = readFileSync(path);
         slowStream.push(buffer.slice(0, 5000));
         setTimeout(() => {
 
@@ -64,13 +62,13 @@ exports.provisionServer = () => {
     });
 
     return server;
-};
+}
 
-exports.provisionLiveServer = function (shared) {
+export function provisionLiveServer (shared) {
 
-    const server = new Hapi.Server({
+    const server = new Server({
         routes: {
-            files: { relativeTo: Path.join(__dirname, 'fixtures') }
+            files: { relativeTo: join(__dirname, 'fixtures') }
         }
     });
 
@@ -81,7 +79,7 @@ exports.provisionLiveServer = function (shared) {
             index = await shared.state.index(request.query);
         }
         else {
-            index = exports.genIndex(shared.state);
+            index = genIndex(shared.state);
         }
 
         return h.response(index.toString()).type('application/vnd.apple.mpegURL');
@@ -90,7 +88,7 @@ exports.provisionLiveServer = function (shared) {
     const serveSegment = (request, h) => {
 
         if (shared.state.slow) {
-            const slowStream = new Readable({ read: Hoek.ignore });
+            const slowStream = new Readable({ read: ignore });
 
             slowStream.push(Buffer.alloc(5000));
 
@@ -102,7 +100,7 @@ exports.provisionLiveServer = function (shared) {
         if (shared.state.unstable) {
             --shared.state.unstable;
 
-            const unstableStream = new Readable({ read: Hoek.ignore });
+            const unstableStream = new Readable({ read: ignore });
 
             unstableStream.push(Buffer.alloc(50 - shared.state.unstable));
             unstableStream.push(null);
@@ -127,9 +125,9 @@ exports.provisionLiveServer = function (shared) {
         handler: serveLiveIndex,
         options: {
             validate: {
-                query: Joi.object({
-                    '_HLS_msn': Joi.number().integer().min(0).optional(),
-                    '_HLS_part': Joi.number().min(0).optional()
+                query: object({
+                    '_HLS_msn': number().integer().min(0).optional(),
+                    '_HLS_part': number().min(0).optional()
                 }).with('_HLS_part', '_HLS_msn')
             }
         }
@@ -138,10 +136,10 @@ exports.provisionLiveServer = function (shared) {
     server.route({ method: 'GET', path: '/live/{msn}-part{part}.ts', handler: serveSegment });
 
     return server;
-};
+}
 
 
-exports.readSegments = async (Class, ...args) => {
+export async function readSegments(Class, ...args) {
 
     /** @type { ReadableStream<unknown> } */
     const r = new Class(...args);
@@ -156,10 +154,10 @@ exports.readSegments = async (Class, ...args) => {
 
         segments.push(value);
     }
-};
+}
 
 
-exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount, partIndex, ended }) {
+export function genIndex ({ targetDuration, segmentCount, firstMsn, partCount, partIndex, ended }) {
 
     const partDuration = targetDuration / partCount;
 
@@ -170,7 +168,7 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
         const parts = [];
         if (i >= segmentCount - 2) {
             for (let j = 0; j < partCount; ++j) {
-                parts.push(new M3U8Parse.AttrList({
+                parts.push(new AttrList({
                     duration: partDuration,
                     uri: `"${firstMsn + i}-part${j}.ts"`
                 }));
@@ -189,7 +187,7 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
         if (partIndex > 0) {
             const parts = [];
             for (let i = 0; i < partIndex; ++i) {
-                parts.push(new M3U8Parse.AttrList({
+                parts.push(new AttrList({
                     duration: partDuration,
                     uri: `"${firstMsn + segmentCount}-part${i}.ts"`
                 }));
@@ -201,17 +199,17 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
         // Add hint
 
         if (!ended) {
-            meta.preload_hints = [new M3U8Parse.AttrList({
+            meta.preload_hints = [new AttrList({
                 type: 'part',
                 uri: `"${firstMsn + segmentCount}-part${partIndex}.ts"`
             })];
         }
     }
 
-    const index = new M3U8Parse.MediaPlaylist({
+    const index = new MediaPlaylist({
         media_sequence: firstMsn,
         target_duration: targetDuration,
-        part_info: partCount ? new M3U8Parse.AttrList({ 'part-target': partDuration }) : undefined,
+        part_info: partCount ? new AttrList({ 'part-target': partDuration }) : undefined,
         segments,
         meta,
         ended
@@ -220,10 +218,10 @@ exports.genIndex = function ({ targetDuration, segmentCount, firstMsn, partCount
     //console.log('GEN', index.startMsn(true), index.lastMsn(true), index.meta.preload_hints, index.ended);
 
     return index;
-};
+}
 
 
-exports.genLlIndex = function (query, state) {
+export function genLlIndex (query, state) {
 
     // Return playlist with exactly the next part
 
@@ -240,9 +238,9 @@ exports.genLlIndex = function (query, state) {
         state.partIndex = part;
     }
 
-    const index = exports.genIndex(state);
+    const index = genIndex(state);
 
-    index.server_control = new M3U8Parse.AttrList({
+    index.server_control = new AttrList({
         'can-block-reload': 'YES',
         'part-hold-back': 3 * state.targetDuration / state.partCount
     });
@@ -266,4 +264,4 @@ exports.genLlIndex = function (query, state) {
     }
 
     return index;
-};
+}

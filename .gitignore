@@ -1,4 +1,6 @@
 /node_modules/
-/lib/*.js
-/lib/*.d.ts
-coverage.html
+/coverage/
+.coveralls.yml
+/lib/
+/test/*.js
+**/*.tsbuildinfo

@@ -1,19 +1,17 @@
-'use strict';
+import { createHash } from 'crypto';
+import { resolve as _resolve, join } from 'path';
 
-const Crypto = require('crypto');
-const Path = require('path');
+import Code from '@hapi/code';
+import { HlsPlaylistFetcher } from 'hls-playlist-reader';
+import { wait } from '@hapi/hoek';
+import { script } from '@hapi/lab';
+import { MediaSegment, AttrList } from 'm3u8parse';
+import Uristream from 'uristream';
 
-const Code = require('@hapi/code');
-const { HlsPlaylistFetcher } = require('hls-playlist-reader');
-const Hoek = require('@hapi/hoek');
-const Lab = require('@hapi/lab');
-const { MediaSegment, AttrList } = require('m3u8parse');
-const Uristream = require('uristream');
-
-const Shared = require('./_shared');
+import { readSegments as _readSegments, provisionServer, provisionLiveServer, genIndex } from './_shared.js';
 
 // eslint-disable-next-line @hapi/capitalize-modules
-const { createSimpleReader, HlsSegmentReadable, HlsFetcherObject, HlsSegmentStreamer } = require('..');
+import { createSimpleReader, HlsSegmentReadable, HlsFetcherObject, HlsSegmentStreamer } from '../lib/index.js';
 
 
 // Declare internals
@@ -40,19 +38,19 @@ internals.nextValue = async function (iter, expectDone = false) {
 
 // Test shortcuts
 
-const lab = exports.lab = Lab.script();
+const lab = exports.lab = script();
 const { after, before, describe, it } = lab;
 const { expect } = Code;
 
 
 describe('HlsSegmentStreamer()', () => {
 
-    const readSegments = Shared.readSegments.bind(null, HlsSegmentStreamer);
+    const readSegments = _readSegments.bind(null, HlsSegmentStreamer);
     let server;
 
     before(async () => {
 
-        server = await Shared.provisionServer();
+        server = await provisionServer();
         return server.start();
     });
 
@@ -95,7 +93,7 @@ describe('HlsSegmentStreamer()', () => {
         for (const [file, mime] of map) {
             const meta = await new Promise((resolve, reject) => {
 
-                const uristream = new Uristream(`file://${Path.resolve(__dirname, 'fixtures/files', file)}`);
+                const uristream = new Uristream(`file://${_resolve(__dirname, 'fixtures/files', file)}`);
                 uristream.on('error', reject);
                 uristream.on('meta', resolve);
             });
@@ -108,7 +106,7 @@ describe('HlsSegmentStreamer()', () => {
 
         await expect((async () => {
 
-            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'badtype.m3u8'), { withData: false });
+            const r = createSimpleReader('file://' + join(__dirname, 'fixtures', 'badtype.m3u8'), { withData: false });
 
             for await (const obj of r.readable) {
 
@@ -118,7 +116,7 @@ describe('HlsSegmentStreamer()', () => {
 
         await expect((async () => {
 
-            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'badtype-data.m3u8'), { withData: true });
+            const r = createSimpleReader('file://' + join(__dirname, 'fixtures', 'badtype-data.m3u8'), { withData: true });
 
             for await (const obj of r.readable) {
 
@@ -345,11 +343,11 @@ describe('HlsSegmentStreamer()', () => {
 
         it('handles byte-range (file)', async () => {
 
-            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'single.m3u8'), { withData: true });
+            const r = createSimpleReader('file://' + join(__dirname, 'fixtures', 'single.m3u8'), { withData: true });
             const checksums = [];
 
             for await (const obj of r.readable) {
-                const hasher = Crypto.createHash('sha1');
+                const hasher = createHash('sha1');
                 hasher.setEncoding('hex');
 
                 obj.stream.pipe(hasher);
@@ -372,7 +370,7 @@ describe('HlsSegmentStreamer()', () => {
             const checksums = [];
 
             for await (const obj of r.readable) {
-                const hasher = Crypto.createHash('sha1');
+                const hasher = createHash('sha1');
                 hasher.setEncoding('hex');
 
                 obj.stream.pipe(hasher);
@@ -391,7 +389,7 @@ describe('HlsSegmentStreamer()', () => {
 
         it('does not internally buffer (highWaterMark=0)', async () => {
 
-            const reader = new HlsSegmentReadable('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'));
+            const reader = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', 'long.m3u8'));
             const streamer = new HlsSegmentStreamer(reader, { withData: false, highWaterMark: 0 });
 
             let reads = 0;
@@ -399,21 +397,21 @@ describe('HlsSegmentStreamer()', () => {
                 ++reads;
                 expect(obj).to.exist();
                 expect(streamer.source.transforms - reads).to.equal(0);
-                await Hoek.wait(20);
+                await wait(20);
                 expect(streamer.source.transforms - reads).to.equal(0);
             }
         });
 
         it('supports the highWaterMark option', async () => {
 
-            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 3 });
+            const r = createSimpleReader('file://' + join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 3 });
             const buffered = [];
 
             let reads = 0;
             for await (const obj of r.readable) {
                 ++reads;
                 expect(obj).to.exist();
-                await Hoek.wait(20);
+                await wait(20);
                 buffered.push(r.source.transforms - reads);
             }
 
@@ -463,7 +461,7 @@ describe('HlsSegmentStreamer()', () => {
 
         it('can be cancelled', async () => {
 
-            const r = createSimpleReader('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
+            const r = createSimpleReader('file://' + join(__dirname, 'fixtures', '500.m3u8'));
 
             let cancelled = false;
             const orig = r.source.reader.fetch.cancel;
@@ -477,7 +475,7 @@ describe('HlsSegmentStreamer()', () => {
             await reader.read();
             await reader.cancel();
 
-            await Hoek.wait();
+            await wait();
             expect(cancelled).to.be.true();
         });
 
@@ -509,7 +507,7 @@ describe('HlsSegmentStreamer()', () => {
 
         before(() => {
 
-            liveServer = Shared.provisionLiveServer(serverState);
+            liveServer = provisionLiveServer(serverState);
             return liveServer.start();
         });
 
@@ -544,7 +542,7 @@ describe('HlsSegmentStreamer()', () => {
             let reset = false;
             const { reader, state } = prepareLiveReader({ fullStream: false }, { firstMsn: 10, async index() {
 
-                const index = Shared.genIndex(state);
+                const index = genIndex(state);
 
                 if (!reset) {
                     state.firstMsn++;
@@ -555,7 +553,7 @@ describe('HlsSegmentStreamer()', () => {
                         reset = true;
                     }
 
-                    await Hoek.wait(20);    // give the reader a chance to catch up
+                    await wait(20);    // give the reader a chance to catch up
                 }
                 else {
                     state.segmentCount++;
@@ -586,7 +584,7 @@ describe('HlsSegmentStreamer()', () => {
             const { reader, state } = prepareLiveReader({}, {
                 index() {
 
-                    const index = Shared.genIndex(state);
+                    const index = genIndex(state);
 
                     if (!skipped) {
                         ++state.firstMsn;

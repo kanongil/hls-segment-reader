@@ -1,36 +1,34 @@
-'use strict';
+import { promises } from 'fs';
+import { tmpdir } from 'os';
+import { join, sep } from 'path';
+import { pathToFileURL } from 'url';
 
-const Fs = require('fs');
-const Os = require('os');
-const Path = require('path');
-const Url = require('url');
+import { notFound, serverUnavailable, unauthorized, Boom as _Boom } from '@hapi/boom';
+import Code from '@hapi/code';
+import { HlsPlaylistFetcher } from 'hls-playlist-reader/fetcher';
+import { wait } from '@hapi/hoek';
+import { script } from '@hapi/lab';
 
-const Boom = require('@hapi/boom');
-const Code = require('@hapi/code');
-const { HlsPlaylistFetcher } = require('hls-playlist-reader');
-const Hoek = require('@hapi/hoek');
-const Lab = require('@hapi/lab');
-
-const Shared = require('./_shared');
-const { HlsSegmentReadable } = require('..');
-const { Deferred } = require('hls-playlist-reader/lib/helpers');
+import Shared, { readSegments as _readSegments, provisionServer, provisionLiveServer, genIndex } from './_shared.js';
+import { HlsSegmentReadable } from '../lib/index.js';
+import { Deferred } from 'hls-playlist-reader/helpers';
 
 
 // Test shortcuts
 
-const lab = exports.lab = Lab.script();
+const lab = exports.lab = script();
 const { after, before, beforeEach, describe, it } = lab;
 const { expect } = Code;
 
 
 describe('HlsSegmentReadable()', () => {
 
-    const readSegments = Shared.readSegments.bind(null, HlsSegmentReadable);
+    const readSegments = _readSegments.bind(null, HlsSegmentReadable);
     let server;
 
     before(async () => {
 
-        server = await Shared.provisionServer();
+        server = await provisionServer();
         return server.start();
     });
 
@@ -52,7 +50,7 @@ describe('HlsSegmentReadable()', () => {
 
             expect(r).to.be.instanceOf(HlsSegmentReadable);
 
-            await Hoek.wait(10);
+            await wait(10);
             await r.cancel();
         });
 
@@ -163,7 +161,7 @@ describe('HlsSegmentReadable()', () => {
             };
 
             let index;
-            const r = new HlsSegmentReadable('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'), { extensions,
+            const r = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', '500.m3u8'), { extensions,
                 onIndex(newIndex) {
 
                     index = newIndex;
@@ -185,7 +183,7 @@ describe('HlsSegmentReadable()', () => {
         it('does not internally buffer', async () => {
 
             let nextCalls = 0;
-            const r = new HlsSegmentReadable('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'));
+            const r = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', 'long.m3u8'));
             const orig = r.fetch.next;
             r.fetch.next = (opts) => {
 
@@ -198,7 +196,7 @@ describe('HlsSegmentReadable()', () => {
                 ++count;
                 expect(obj).to.exist();
                 expect(nextCalls - count).to.equal(0);
-                await Hoek.wait(1);
+                await wait(1);
                 expect(nextCalls - count).to.equal(0);
             }
         });
@@ -219,8 +217,9 @@ describe('HlsSegmentReadable()', () => {
 
         it('can be cancelled', async () => {
 
+            const r = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', '500.m3u8'));
+
             let cancelled = false;
-            const r = new HlsSegmentReadable('file://' + Path.join(__dirname, 'fixtures', '500.m3u8'));
             const orig = r.fetch.cancel;
             r.fetch.cancel = (err) => {
 
@@ -266,7 +265,7 @@ describe('HlsSegmentReadable()', () => {
 
         before(() => {
 
-            liveServer = Shared.provisionLiveServer(serverState);
+            liveServer = provisionLiveServer(serverState);
             return liveServer.start();
         });
 
@@ -300,11 +299,11 @@ describe('HlsSegmentReadable()', () => {
 
             const state = serverState.state = { firstMsn: 0, segmentCount: 10, targetDuration: 10 };
 
-            const tmpDir = await Fs.promises.mkdtemp(await Fs.promises.realpath(Os.tmpdir()) + Path.sep);
+            const tmpDir = await promises.mkdtemp(await promises.realpath(tmpdir()) + sep);
             try {
-                const tmpUrl = new URL('next.m3u8', Url.pathToFileURL(tmpDir + Path.sep));
-                const indexUrl = new URL('index.m3u8', Url.pathToFileURL(tmpDir + Path.sep));
-                await Fs.promises.writeFile(indexUrl, Shared.genIndex(state).toString(), 'utf-8');
+                const tmpUrl = new URL('next.m3u8', pathToFileURL(tmpDir + sep));
+                const indexUrl = new URL('index.m3u8', pathToFileURL(tmpDir + sep));
+                await promises.writeFile(indexUrl, genIndex(state).toString(), 'utf-8');
 
                 const reader = new HlsSegmentReadable(indexUrl.href, { fullStream: true });
                 const segments = [];
@@ -312,7 +311,7 @@ describe('HlsSegmentReadable()', () => {
                 (async () => {
 
                     while (!state.ended) {
-                        await Hoek.wait(50);
+                        await wait(50);
 
                         state.firstMsn++;
                         if (state.firstMsn === 5) {
@@ -321,8 +320,8 @@ describe('HlsSegmentReadable()', () => {
 
                         // Atomic write
 
-                        await Fs.promises.writeFile(tmpUrl, Shared.genIndex(state).toString(), 'utf-8');
-                        await Fs.promises.rename(tmpUrl, indexUrl);
+                        await promises.writeFile(tmpUrl, genIndex(state).toString(), 'utf-8');
+                        await promises.rename(tmpUrl, indexUrl);
                     }
                 })();
 
@@ -334,7 +333,7 @@ describe('HlsSegmentReadable()', () => {
                 expect(segments).to.have.length(15);
             }
             finally {
-                await Fs.promises.rm(tmpDir, { recursive: true });
+                await promises.rm(tmpDir, { recursive: true });
             }
         });
 
@@ -342,7 +341,7 @@ describe('HlsSegmentReadable()', () => {
 
             const { reader, state } = prepareLiveReader({}, { segmentCount: 0, index() {
 
-                const index = Shared.genIndex(state);
+                const index = genIndex(state);
                 index.type = 'EVENT';
 
                 if (state.segmentCount === 5) {
@@ -404,7 +403,7 @@ describe('HlsSegmentReadable()', () => {
                         }
                     }
 
-                    return Shared.genIndex(state);
+                    return genIndex(state);
                 }
             });
 
@@ -426,7 +425,7 @@ describe('HlsSegmentReadable()', () => {
             const { reader, state } = prepareLiveReader({}, {
                 index() {
 
-                    const index = Shared.genIndex(state);
+                    const index = genIndex(state);
 
                     if (!skipped) {
                         ++state.firstMsn;
@@ -479,7 +478,7 @@ describe('HlsSegmentReadable()', () => {
                         state.ended = true;
                     }
 
-                    const index = Shared.genIndex(state);
+                    const index = genIndex(state);
 
                     ++state.firstMsn;
 
@@ -507,7 +506,7 @@ describe('HlsSegmentReadable()', () => {
                         state.ended = true;
                     }
 
-                    const index = Shared.genIndex(state);
+                    const index = genIndex(state);
 
                     return index;
                 }
@@ -519,7 +518,7 @@ describe('HlsSegmentReadable()', () => {
 
                 state.firstMsn += 5;
 
-                await Hoek.wait(5);
+                await wait(5);
             }
 
             expect(segments).to.have.length(20);
@@ -556,10 +555,10 @@ describe('HlsSegmentReadable()', () => {
                     async index() {
 
                         if (state.firstMsn > 0) {
-                            await Hoek.wait(100);
+                            await wait(100);
                         }
 
-                        return Shared.genIndex(state);
+                        return genIndex(state);
                     }
                 });
 
@@ -588,10 +587,10 @@ describe('HlsSegmentReadable()', () => {
                     async index() {
 
                         if (state.firstMsn > 0) {
-                            await Hoek.wait(10);
+                            await wait(10);
                         }
 
-                        return Shared.genIndex(state);
+                        return genIndex(state);
                     }
                 });
 
@@ -636,11 +635,11 @@ describe('HlsSegmentReadable()', () => {
                                 case 1:
                                 case 2:
                                 case 3:
-                                    throw Boom.notFound();
+                                    throw notFound();
                                 case 4:
-                                    throw Boom.serverUnavailable();
+                                    throw serverUnavailable();
                                 case 5:
-                                    throw Boom.unauthorized();
+                                    throw unauthorized();
                             }
                         }
                         else if (state.firstMsn === 5) {
@@ -648,7 +647,7 @@ describe('HlsSegmentReadable()', () => {
                             return '';
                         }
 
-                        const index = Shared.genIndex(state);
+                        const index = genIndex(state);
 
                         ++state.firstMsn;
 
@@ -675,8 +674,8 @@ describe('HlsSegmentReadable()', () => {
                 expect(segments.length).to.equal(14);
                 expect(errors).to.have.length(4);
                 expect(errors[0]).to.have.error('No line data');
-                expect(errors[1]).to.have.error(Boom.Boom, 'Not Found');
-                expect(errors[2]).to.have.error(Boom.Boom, 'Service Unavailable');
+                expect(errors[1]).to.have.error(_Boom, 'Not Found');
+                expect(errors[2]).to.have.error(_Boom, 'Service Unavailable');
                 expect(errors[3]).to.shallow.equal(err);
             });
         });
