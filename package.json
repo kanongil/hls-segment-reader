@@ -5,14 +5,15 @@
   "main": "lib/index.js",
   "type": "module",
   "scripts": {
-    "clean": "rm -f lib/*.{js,d.ts}",
+    "clean": "tsc -b src test --clean; rm -Rf ./coverage",
     "compile": "tsc -b src",
-    "postpack": "npm run clean",
-    "prepack": "tsc -b src",
-    "test": "lab --typescript -t 90",
-    "test-full": "npm test && npm run test-js",
-    "test-cov-html": "lab --typescript -c -r html -o coverage.html",
-    "test-js": "tsc && lab --t 0 && npm run clean"
+    "mocha": "mocha -R dot --check-leaks 'test/*.test.js'",
+    "lint": "eslint .",
+    "prepublishOnly": "npm run compile -- --force",
+    "pretest": "concurrently 'npm run lint' 'tsc -b test'",
+    "test": "c8 --check-coverage -- npm run mocha",
+    "test-cov-html": "tsc -b test && c8 -r html mocha -R dot 'test/*.test.js'",
+    "test-with-polyfills": "npm run pretest && c8 --check-coverage -- npm run mocha -- -r ./test/hook-polyfills.js"
   },
   "keywords": [
     "streaming",

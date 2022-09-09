@@ -4,11 +4,14 @@ import type { ParsedPlaylist } from 'hls-playlist-reader/playlist';
 
 import { M3U8Playlist, MediaPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
-import { HlsIndexMeta, HlsPlaylistFetcher, HlsPlaylistFetcherOptions, PlaylistObject } from 'hls-playlist-reader/fetcher';
+import { HlsIndexMeta, HlsPlaylistFetcher, PlaylistObject } from 'hls-playlist-reader/fetcher';
 import { AbortController, assert, Deferred, wait } from 'hls-playlist-reader/helpers';
 
 const WeakRef = globalThis.WeakRef ?? await import('./weakref.ponyfill.js');
-
+let setMaxListeners = (_n: number, _target: object) => undefined;
+if (typeof process === 'object') {
+    setMaxListeners = (await import('node' + ':events')).setMaxListeners;
+}
 
 class SegmentPointer {
 
@@ -33,18 +36,6 @@ class SegmentPointer {
     isEmpty(): boolean {
 
         return this.msn < 0;
-    }
-}
-
-class UnendingPlaylistFetcher extends HlsPlaylistFetcher {
-
-    protected preprocessIndex<T extends M3U8Playlist>(index: T): T | undefined {
-
-        if (!index.master) {
-            MediaPlaylist.cast(index).ended = false;
-        }
-
-        return super.preprocessIndex(index);
     }
 }
 
@@ -101,26 +92,24 @@ export class HlsFetcherObject {
         return this.#closed.promise;
     }
 
-    /**
-     * Triggers once the segment is evicted from the parent index.
-     */
-    get evicted(): AbortSignal {
-
-        return this.#evicted.signal;
-    }
-
-    // For internal usage
-
-    _close(): void {
+    close(): void {
 
         if (!this.isClosed) {
             return this._update(true);
         }
     }
 
-    _evict(): void {
+    /**
+     * Triggers if the segment data is no longer retrievable.
+     */
+    get evicted(): AbortSignal {
 
-        this.#evicted.abort();      // TODO: add an eviction delay??? Eg. segment duration??
+        return this.#evicted.signal;
+    }
+
+    evict(reason?: Error): void {
+
+        this.#evicted.abort(reason);
     }
 
     private _update(closed: boolean, old?: IndependentSegment): void {
@@ -145,14 +134,13 @@ export type HlsSegmentFetcherOptions = {
     /** Initial segment ends after this date */
     startDate?: Date | string | number;
 
-    /** End when segment start after this date */
-    stopDate?: Date | string | number;
-
     /** Emit error if playlist is not updated for `maxStallTime` ms */
     maxStallTime?: number;
 
     onIndex?: (index: Readonly<M3U8Playlist>, meta: Readonly<HlsIndexMeta>) => void;
-} & HlsPlaylistFetcherOptions;
+
+    onProblem?: (err: Error) => void;
+};
 
 
 /**
@@ -163,7 +151,6 @@ export class HlsSegmentFetcher {
 
     readonly fullStream: boolean;
     startDate?: Date;
-    stopDate?: Date;
     stallAfterMs: number;
 
     readonly source: HlsPlaylistFetcher;
@@ -178,18 +165,20 @@ export class HlsSegmentFetcher {
     #pending = false;
     #track = {
         active: new Map<string, WeakRef<HlsFetcherObject>>(),
-        gen: 0,
-        startMsn: -1
+        gen: 0
     };
 
-    constructor(src: string | URL, options: HlsSegmentFetcherOptions = {}) {
+    constructor(source: HlsPlaylistFetcher, options: HlsSegmentFetcherOptions = {}) {
+
+        assert(source instanceof HlsPlaylistFetcher, 'Source must be a HlsPlaylistFetcher');
+
+        this.source = source;
 
         this.fullStream = !!options.fullStream;
 
         // Dates are inclusive
 
         this.startDate = options.startDate ? new Date(options.startDate) : undefined;
-        this.stopDate = options.stopDate ? new Date(options.stopDate) : undefined;
         this.stallAfterMs = options.maxStallTime ?? Infinity;
 
         if (options.onProblem) {
@@ -200,7 +189,7 @@ export class HlsSegmentFetcher {
             this.onIndex = options.onIndex;
         }
 
-        this.source = new (this.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher)(src, { ...options, onProblem: this.onProblem.bind(this) });
+        setMaxListeners(0, this.#ac.signal);
     }
 
     // Public API
@@ -208,10 +197,19 @@ export class HlsSegmentFetcher {
     /** Start fetching, returning the initial index */
     start(): Promise<Readonly<M3U8Playlist>> {
 
+        this.#ac.signal.throwIfAborted();
+
+        // Track aborted to immediately evict all segments
+
+        this.#ac.signal.addEventListener('abort', () => this._evictAll(this.#ac.signal.reason), { once: true });
+
+        // Start feed fetcher
+
         const promise = this.source.index();
         this._feedFetcher(promise).catch((err) => {
 
             this.#nextPlaylist.reject(err);
+            this._evictAll(err);            // TODO: make this eviction optional?
         });
 
         return promise.then((obj) => obj.index);
@@ -233,6 +231,12 @@ export class HlsSegmentFetcher {
             .finally(() => this.#pending = false);
     }
 
+    finalize({ timeout = 30_000 } = {}): Promise<void> {    // FIXME: is the method useful?
+
+        return wait(timeout, { signal: this.#ac.signal })
+            .then(() => this.cancel());
+    }
+
     cancel(reason?: Error): void {
 
         if (this.#ac.signal.aborted) {
@@ -240,16 +244,17 @@ export class HlsSegmentFetcher {
         }
 
         this.#ac.abort();
-        this.#current?._close();
+        this.#current?.close();
         this.#current = null;
         this.source.cancel(reason);
-        this._updateEvictions();
     }
 
     // Overrideable hooks
 
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
     protected onProblem(_err: Error) {}
 
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
     protected onIndex(_index: Readonly<M3U8Playlist>, _meta: Readonly<HlsIndexMeta>) {}
 
     // Private methods
@@ -297,7 +302,7 @@ export class HlsSegmentFetcher {
 
         // Update evictions
 
-        this._updateEvictions(index)
+        this._updateEvictions(index);
 
         // Immediately update active entry with latest data
 
@@ -322,43 +327,45 @@ export class HlsSegmentFetcher {
         this.#nextPlaylist = new Deferred(true);
     }
 
-    private _updateEvictions(index?: Readonly<MediaPlaylist>) {
+    private _updateEvictions(index: Readonly<MediaPlaylist>) {
 
         const track = this.#track;
+
+        const previous = this.#playlist?.index;
+        if (previous) {
+            track.gen += +(index.media_sequence < previous.media_sequence);
+        }
+
         const incoming = new Set<string>();
-
-        if (index) {
-            track.gen += +(index.media_sequence < track.startMsn);
-            track.startMsn = index.media_sequence;
-
-            for (let i = index.startMsn(true); i <= index.lastMsn(true); ++i) {
-                incoming.add(`${track.gen}-${i}`);
-            }
+        for (let i = index.startMsn(true); i <= index.lastMsn(true); ++i) {
+            incoming.add(`${track.gen}-${i}`);
         }
 
         // Evict all expired segments
 
-        const waitTime = +index?.target_duration! * 1000;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
+        const waitTime = previous?.target_duration ?? +index.target_duration! * 1000;
         for (const [token, ref] of track.active) {
             if (!incoming.has(token)) {
                 const segment = ref.deref();
                 if (segment) {
-                    if (index) {
 
-                        // Wait one target duration before evicting
+                    // Wait one target duration before evicting
 
-                        wait(segment.entry.duration! * 1000, { signal: this.#ac.signal })
-                            .catch(() => undefined)
-                            .then(() => ref.deref()?._evict());
-                    }
-                    else {
-                        segment._evict();
-                    }
+                    wait(waitTime, { signal: this.#ac.signal })
+                        .then(() => ref.deref()?.evict(), (err) => ref.deref()?.evict(err));
                 }
-
-                incoming.delete(token);
             }
         }
+    }
+
+    private _evictAll(reason?: Error) {
+
+        for (const ref of this.#track.active.values()) {
+            ref.deref()?.evict(reason);
+        }
+
+        this.#track.active.clear();
     }
 
     async _getNextSegment() {
@@ -367,7 +374,7 @@ export class HlsSegmentFetcher {
 
         const result = await this._getSegmentOrWait(this.#next);
 
-        this.#current?._close();
+        this.#current?.close();
         this.#current = null;
 
         if (result) {
@@ -379,6 +386,7 @@ export class HlsSegmentFetcher {
             }
 
             const obj = new HlsFetcherObject(result.ptr.msn, result.segment, this.source.baseUrl);
+            this.#track.active.set(`${this.#track.gen}-${obj.msn}`, new WeakRef(obj));
             this.#next = result.ptr.next();
 
             if (result.segment.isPartial()) {
@@ -386,13 +394,13 @@ export class HlsSegmentFetcher {
                 // Try to fetch remainder of segment parts (in the background)
 
                 this.#current = obj;
-                this._getSegmentOrWait(new SegmentPointer(result.ptr.msn)).catch((/*err*/) => {
+                this._getSegmentOrWait(new SegmentPointer(result.ptr.msn)).catch((_err) => {
 
                     // Ignore
 
                 }).finally(() => {
 
-                    obj._close();
+                    obj.close();
                     if (obj === this.#current) {
                         this.#current = null;
                     }
@@ -442,17 +450,11 @@ export class HlsSegmentFetcher {
                 (ptr.part === undefined && segment.isPartial()) ||
                 (ptr.part && ptr.part >= (segment?.parts?.length || 0))) {
 
-                if (!playlist.index.isLive()) { // TODO: also check fetcher???
+                if (!playlist.index.isLive() || !this.source.canUpdate()) {
                     break;        // Done - nothing more to do
                 }
 
                 continue;         // Try again
-            }
-
-            // Check if we need to stop due to options
-
-            if (this.stopDate && (segment.program_time || 0) > this.stopDate) {
-                break;
             }
 
             return { ptr, discont, segment };

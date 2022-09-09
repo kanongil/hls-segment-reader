@@ -1,15 +1,17 @@
 /// <reference lib="dom" />
 
-import { HlsFetcherObject, HlsSegmentFetcher, HlsSegmentFetcherOptions } from './segment-fetcher.js';
+import { assert } from 'hls-playlist-reader/helpers';
 
+import { HlsFetcherObject, HlsSegmentFetcher } from './segment-fetcher.js';
 
-export type HlsSegmentReaderOptions = HlsSegmentFetcherOptions;
 
 class HlsSegmentSource implements UnderlyingSource<HlsFetcherObject> {
 
     fetch: HlsSegmentFetcher;
 
     constructor(fetcher: HlsSegmentFetcher) {
+
+        assert(fetcher instanceof HlsSegmentFetcher, 'A fetcher must be supplied');
 
         this.fetch = fetcher;
     }
@@ -18,7 +20,6 @@ class HlsSegmentSource implements UnderlyingSource<HlsFetcherObject> {
 
         const index = await this.fetch.start();
         if (index.master) {
-            //this.fetch!.cancel();
             controller.close();
             return;
         }
@@ -28,7 +29,6 @@ class HlsSegmentSource implements UnderlyingSource<HlsFetcherObject> {
 
         const res = await this.fetch.next();
         if (!res) {
-            //this.fetch!.cancel();
             return controller.close();
         }
 
@@ -37,7 +37,7 @@ class HlsSegmentSource implements UnderlyingSource<HlsFetcherObject> {
 
     cancel(reason: any) {
 
-        this.fetch.cancel(reason);
+        this.fetch?.cancel(reason);
         (<Partial<this>> this).fetch = undefined;      // Unlink reference
     }
 }
@@ -48,16 +48,14 @@ class HlsSegmentSource implements UnderlyingSource<HlsFetcherObject> {
  */
 export class HlsSegmentReadable extends ReadableStream<HlsFetcherObject> {
 
-    fetch: HlsSegmentFetcher;
+    source: HlsSegmentSource;
 
-    constructor(uri: URL | string, options: HlsSegmentReaderOptions = {}) {
+    constructor(fetcher: HlsSegmentFetcher) {
 
-        const source = new HlsSegmentSource(
-            new HlsSegmentFetcher(uri, options)
-        );
+        const source = new HlsSegmentSource(fetcher);
 
         super(source, new CountQueuingStrategy({ highWaterMark: 0 }));
 
-        this.fetch = source.fetch!;
+        this.source = source;
     }
 }

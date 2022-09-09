@@ -1,12 +1,13 @@
 /// <reference lib="dom" />
 
-import type { HlsFetcherObject, HlsSegmentReaderOptions } from './index.js';
+import type { HlsFetcherObject } from './index.js';
 import { FetchResult, Byterange, performFetch } from 'hls-playlist-reader/helpers';
 
 import { AttrList } from 'm3u8parse';
 import { assert } from 'hls-playlist-reader/helpers';
 
 import { HlsSegmentReadable } from './index.js';
+import { HlsSegmentFetcher } from './segment-fetcher.js';
 
 try {
     // TODO: find better way to hook these
@@ -55,7 +56,7 @@ export class HlsStreamerObject {
 
     type: 'segment' | 'map';
     file: FetchResult['meta'];
-    stream?: ReadableStream;
+    stream?: ReadableStream<Uint8Array>;
     segment?: HlsFetcherObject;
     attrs?: AttrList;
 
@@ -82,6 +83,8 @@ export class HlsStreamerObject {
 export type HlsSegmentStreamerOptions = {
     withData?: boolean; // default true
     highWaterMark?: number;
+
+    onProblem?: (err: Error) => void;
 };
 
 
@@ -100,9 +103,13 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
     #started = false;
     #ended = false;
 
-    constructor(options: HlsSegmentStreamerOptions = {}) {
+    constructor(options: Omit<HlsSegmentStreamerOptions, 'highWaterMark'> = {}) {
 
         this.withData = options.withData ?? true;
+
+        if (options.onProblem) {
+            this.onProblem = options.onProblem;
+        }
     }
 
     start(_controller: TransformStreamDefaultController) {
@@ -141,6 +148,9 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             throw new Error(`Unsupported segment MIME type: ${meta.mime}`);
         }
     }
+
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    protected onProblem(_err: Error) {}
 
     // Private methods
 
@@ -185,7 +195,9 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 }
                 catch (err: any) {
                     reader.cancel();
-                    throw new Error('Failed to download map data: ' + err.message);
+                    throw Object.assign(new Error('Failed to download map data: ' + err.message), {
+                        httpStatus: err.name !== 'AbortError' ? 500 : undefined
+                    });
                 }
                 finally {
                     reader.releaseLock();
@@ -199,8 +211,9 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                     throw err;
                 }
 
-                // FIXME: add problem handler
-                //this.emit('problem', new Error('Failed to fetch map: ' + err.message));
+                this.onProblem(Object.assign(new Error('Failed attempt to fetch map: ' + err.message), {
+                    httpStatus: err.name !== 'AbortError' ? err.httpStatus ?? 500 : undefined
+                }));
 
                 // Delay and retry
 
@@ -266,7 +279,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             if (segment.entry.map) {
                 map = this._fetchMapObject(segment)
                     .then((obj) => {
-                        
+
                         this.#readState.map = segment.entry.map;
                         controller.enqueue(obj);     // Immediately enqueue
                     });
@@ -306,11 +319,11 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 }
 
 
-export class HlsSegmentStreamer extends ReadableStream {
+export class HlsSegmentStreamer extends ReadableStream<HlsStreamerObject> {
 
     readonly source: HlsSegmentDataSource;
-    
-    constructor(uri: URL | string, options: HlsSegmentReaderOptions & HlsSegmentStreamerOptions = {}) {
+
+    constructor(reader: ReadableStream<HlsFetcherObject>, options: HlsSegmentStreamerOptions = {}) {
 
         super();
 
@@ -323,23 +336,31 @@ export class HlsSegmentStreamer extends ReadableStream {
 
         this.source = source;
 
-        const readable = new HlsSegmentReadable(uri, { ...options });
-        readable.pipeThrough(transform);
+        reader.pipeThrough(transform, {});
+
+        // TODO: cancel reader, but not streamer on non-Error cancels?
 
         // Mirror transform ReadableStream
 
-        for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(ReadableStream.prototype))) {
-            if (name === 'constructor') {
+        for (const key of Reflect.ownKeys(ReadableStream.prototype)) {
+            const descriptor = Object.getOwnPropertyDescriptor(ReadableStream.prototype, key)!;
+            if (key === 'constructor') {
                 continue;
             }
 
             if (descriptor.value) {
                 descriptor.value = descriptor.value.bind(transform.readable);
-            } else {
+            }
+            else {
                 descriptor.get = descriptor.get?.bind(transform.readable);
             }
 
-            Object.defineProperty(this, name, descriptor);
+            Object.defineProperty(this, key, descriptor);
         }
     }
+
+    /*cancel(reason?: any): Promise<void> {
+
+        if (this.)
+    }*/
 }

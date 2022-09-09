@@ -1,30 +1,56 @@
-import { promises } from 'fs';
-import { tmpdir } from 'os';
-import { join, sep } from 'path';
-import { pathToFileURL } from 'url';
+//import { promises } from 'fs';
+//import { tmpdir } from 'os';
+//import { join/*, sep*/ } from 'path';
+//import { pathToFileURL } from 'url';
 
-import { notFound, serverUnavailable, unauthorized, Boom as _Boom } from '@hapi/boom';
-import Code from '@hapi/code';
-import { HlsPlaylistFetcher } from 'hls-playlist-reader/fetcher';
-import { wait } from '@hapi/hoek';
-import { script } from '@hapi/lab';
-
-import Shared, { readSegments as _readSegments, provisionServer, provisionLiveServer, genIndex } from './_shared.js';
-import { HlsSegmentReadable } from '../lib/index.js';
+import { notFound, serverUnavailable, unauthorized } from '@hapi/boom';
+import { expect } from '@hapi/code';
+import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
 import { Deferred } from 'hls-playlist-reader/helpers';
+import { wait } from '@hapi/hoek';
+import { AttrList, MainPlaylist, MediaPlaylist } from 'm3u8parse';
+
+import { expectCause, provisionServer, provisionLiveServer, genIndex, ServerState, UnprotectedPlaylistFetcher, LlIndexState, genLlIndex } from './_shared.js';
+import { HlsSegmentReadable, HlsFetcherObject } from '../lib/index.js';
+import { HlsSegmentFetcher, HlsSegmentFetcherOptions } from '../lib/segment-fetcher.js';
 
 
-// Test shortcuts
-
-const lab = exports.lab = script();
-const { after, before, beforeEach, describe, it } = lab;
-const { expect } = Code;
+declare global {
+    // Add AsyncIterator which is implemented by node.js
+    interface ReadableStream<R = any> {
+        [Symbol.asyncIterator](): AsyncIterator<R>;
+    }
+}
 
 
 describe('HlsSegmentReadable()', () => {
 
-    const readSegments = _readSegments.bind(null, HlsSegmentReadable);
-    let server;
+    const createReadable = (url: URL | string, options?: HlsSegmentFetcherOptions & HlsPlaylistFetcherOptions) => {
+
+        const fetcher = new HlsSegmentFetcher(new HlsPlaylistFetcher(url, options), options);
+        return new HlsSegmentReadable(fetcher);
+    };
+
+    const readSegments = function (url: string, options?: HlsSegmentFetcherOptions & HlsPlaylistFetcherOptions): Promise<HlsFetcherObject[]> {
+
+        const r = createReadable(url, options);
+        const reader = r.getReader();
+        const segments: HlsFetcherObject[] = [];
+
+        return (async () => {
+
+            for (; ;) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    return segments;
+                }
+
+                segments.push(value as any);
+            }
+        })();
+    };
+
+    let server: Awaited<ReturnType<typeof provisionServer>>;
 
     before(async () => {
 
@@ -34,7 +60,7 @@ describe('HlsSegmentReadable()', () => {
 
     beforeEach(() => {
 
-        server.onRequest = null;
+        (server as any).onRequest = null;
     });
 
     after(() => {
@@ -46,7 +72,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('creates a valid object', async () => {
 
-            const r = new HlsSegmentReadable('http://127.0.0.1:' + server.info.port + '/simple/500.m3u8');
+            const r = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/500.m3u8`)));
 
             expect(r).to.be.instanceOf(HlsSegmentReadable);
 
@@ -54,19 +80,19 @@ describe('HlsSegmentReadable()', () => {
             await r.cancel();
         });
 
-        it('throws on missing uri option', () => {
+        it('throws on missing fetcher option', () => {
 
             const createObject = () => {
 
-                return new HlsSegmentReadable();
+                return new (HlsSegmentReadable as any)();
             };
 
             expect(createObject).to.throw();
         });
 
-        it('rejects on read() with invalid uri option', async () => {
+        it('rejects on read() with invalid fetcher uri', async () => {
 
-            const r = new HlsSegmentReadable('asdf://test');
+            const r = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher('asdf://test')));
             const reader = r.getReader();
 
             await expect(reader.read()).to.reject();
@@ -78,24 +104,24 @@ describe('HlsSegmentReadable()', () => {
 
         it('does not output any segments', async () => {
 
-            const segments = await readSegments(`http://127.0.0.1:${server.info.port}/simple/index.m3u8`);
+            const segments = await readSegments(`${server.info.uri}/simple/index.m3u8`);
             expect(segments).to.have.length(0);
         });
 
         it('calls "onIndex" hook', async () => {
 
-            let remoteIndex;
-            const segments = await readSegments(`http://127.0.0.1:${server.info.port}/simple/index.m3u8`, {
+            let remoteIndex: Readonly<MainPlaylist> | undefined;
+            const segments = await readSegments(`${server.info.uri}/simple/index.m3u8`, {
                 onIndex(index) {
 
-                    remoteIndex = index;
+                    remoteIndex = index as MainPlaylist;
                 }
             });
 
             expect(segments).to.have.length(0);
             expect(remoteIndex).to.exist();
-            expect(remoteIndex.master).to.be.true();
-            expect(remoteIndex.variants[0].uri).to.exist();
+            expect(remoteIndex!.master).to.be.true();
+            expect(remoteIndex!.variants[0].uri).to.exist();
         });
     });
 
@@ -103,7 +129,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('outputs all segments', async () => {
 
-            const segments = await readSegments(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`);
+            const segments = await readSegments(`${server.info.uri}/simple/500.m3u8`);
 
             expect(segments.length).to.equal(3);
             for (let i = 0; i < segments.length; ++i) {
@@ -114,7 +140,7 @@ describe('HlsSegmentReadable()', () => {
         it('emits the "index" event before first read returns', async () => {
 
             const deferred = new Deferred();
-            const readable = new HlsSegmentReadable(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`, {
+            const readable = createReadable(`${server.info.uri}/simple/500.m3u8`, {
                 onIndex() {
 
                     deferred.resolve('index');
@@ -129,7 +155,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('supports the startDate option', async () => {
 
-            const r = new HlsSegmentReadable(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`, { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = createReadable(`${server.info.uri}/simple/500.m3u8`, { startDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
             const segments = [];
 
             for await (const segment of r) {
@@ -140,9 +166,9 @@ describe('HlsSegmentReadable()', () => {
             expect(segments).to.have.length(1);
         });
 
-        it('supports the stopDate option', async () => {
+        /*it('supports the stopDate option', async () => {
 
-            const r = new HlsSegmentReadable(`http://127.0.0.1:${server.info.port}/simple/500.m3u8`, { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
+            const r = createReadable(`${server.info.uri}/simple/500.m3u8`, { stopDate: new Date('Fri Jan 07 2000 07:03:09 GMT+0100 (CET)') });
             const segments = [];
 
             for await (const segment of r) {
@@ -151,7 +177,7 @@ describe('HlsSegmentReadable()', () => {
             }
 
             expect(segments).to.have.length(2);
-        });
+        });*/
 
         it('applies the extensions option', async () => {
 
@@ -160,11 +186,11 @@ describe('HlsSegmentReadable()', () => {
                 '#EXT-MY-SEGMENT-OK': true
             };
 
-            let index;
-            const r = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', '500.m3u8'), { extensions,
+            let index: Readonly<MediaPlaylist> | undefined;
+            const r = createReadable(`${server.info.uri}/simple/500.m3u8`, { extensions,
                 onIndex(newIndex) {
 
-                    index = newIndex;
+                    index = newIndex as MediaPlaylist;
                 }
             });
 
@@ -174,21 +200,21 @@ describe('HlsSegmentReadable()', () => {
             }
 
             expect(index).to.exist();
-            expect(index.vendor[0]).to.equal(['#EXT-MY-HEADER', 'hello']);
-            expect(index.segments[1].vendor[0]).to.equal(['#EXT-MY-SEGMENT-OK', null]);
+            expect(index!.vendor).to.equal([['#EXT-MY-HEADER', 'hello']]);
+            expect(index!.segments[1].vendor).to.equal([['#EXT-MY-SEGMENT-OK', null]]);
             expect(segments).to.have.length(3);
-            expect(segments[1].entry.vendor[0]).to.equal(['#EXT-MY-SEGMENT-OK', null]);
+            expect(segments[1].entry.vendor).to.equal([['#EXT-MY-SEGMENT-OK', null]]);
         });
 
         it('does not internally buffer', async () => {
 
             let nextCalls = 0;
-            const r = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', 'long.m3u8'));
-            const orig = r.fetch.next;
-            r.fetch.next = (opts) => {
+            const r = createReadable(`${server.info.uri}/simple/long.m3u8`);
+            const orig = r.source.fetch.next;
+            r.source.fetch.next = (opts) => {
 
                 ++nextCalls;
-                return orig.call(r.fetch, opts);
+                return orig.call(r.source.fetch, opts);
             };
 
             let count = 0;
@@ -203,7 +229,7 @@ describe('HlsSegmentReadable()', () => {
 
         /*it('supports the highWaterMark option', async () => {
 
-            const r = new HlsSegmentReadable('file://' + Path.join(__dirname, 'fixtures', 'long.m3u8'), { highWaterMark: 2 });
+            const r = createReadable(`${server.info.uri}/simple/long.m3u8`, { highWaterMark: 2 });
             const buffered = [];
 
             for await (const obj of r) {
@@ -217,14 +243,14 @@ describe('HlsSegmentReadable()', () => {
 
         it('can be cancelled', async () => {
 
-            const r = new HlsSegmentReadable('file://' + join(__dirname, 'fixtures', '500.m3u8'));
+            const r = createReadable(`${server.info.uri}/simple/500.m3u8`);
 
             let cancelled = false;
-            const orig = r.fetch.cancel;
-            r.fetch.cancel = (err) => {
+            const orig = r.source.fetch.cancel;
+            r.source.fetch.cancel = (err) => {
 
                 cancelled = true;
-                return orig.call(r.fetch, err);
+                return orig.call(r.source.fetch, err);
             };
 
             const segments = [];
@@ -243,18 +269,26 @@ describe('HlsSegmentReadable()', () => {
         // handles .m3u files
     });
 
-    describe('live index', { parallel: false }, () => {
+    describe('live index', () => {
 
-        const serverState = { state: {} };
-        let liveServer;
+        const serverState = {} as { state: ServerState };
+        let liveServer: Awaited<ReturnType<typeof provisionServer>>;
 
-        const prepareLiveReader = function (readerOptions = {}, state = {}) {
+        const prepareLiveReader = function (readerOptions: HlsSegmentFetcherOptions & HlsPlaylistFetcherOptions = {}, state: Partial<ServerState> = {}): {
+            reader: HlsSegmentReadable;
+            state: ServerState & {
+                error?: number;
+                jumped?: boolean;
+            };
+        } {
 
-            const reader = new HlsSegmentReadable(`http://127.0.0.1:${liveServer.info.port}/live/live.m3u8`, { fullStream: true, ...readerOptions });
-            reader.fetch.source._intervals = [];
-            reader.fetch.source.getUpdateInterval = function (...args) {
+            const reader = createReadable(`${liveServer.info.uri}/live/live.m3u8`, { fullStream: true, ...readerOptions });
+            const fetch = reader.source.fetch.source as any as UnprotectedPlaylistFetcher;
+            const superFn = fetch.getUpdateInterval;
+            fetch._intervals = [];
+            fetch.getUpdateInterval = function (...args) {
 
-                this._intervals.push(HlsPlaylistFetcher.prototype.getUpdateInterval.call(this, ...args));
+                this._intervals.push(superFn.call(this, ...args));
                 return undefined;
             };
 
@@ -295,7 +329,7 @@ describe('HlsSegmentReadable()', () => {
             expect(segments).to.have.length(15);
         });
 
-        it('handles a basic stream (file)', async () => {
+        /*it('handles a basic stream (file)', async () => {
 
             const state = serverState.state = { firstMsn: 0, segmentCount: 10, targetDuration: 10 };
 
@@ -305,7 +339,7 @@ describe('HlsSegmentReadable()', () => {
                 const indexUrl = new URL('index.m3u8', pathToFileURL(tmpDir + sep));
                 await promises.writeFile(indexUrl, genIndex(state).toString(), 'utf-8');
 
-                const reader = new HlsSegmentReadable(indexUrl.href, { fullStream: true });
+                const reader = createReadable(indexUrl.href, { fullStream: true });
                 const segments = [];
 
                 (async () => {
@@ -335,7 +369,7 @@ describe('HlsSegmentReadable()', () => {
             finally {
                 await promises.rm(tmpDir, { recursive: true });
             }
-        });
+        });*/
 
         it('can start with 0 segments', async () => {
 
@@ -367,7 +401,7 @@ describe('HlsSegmentReadable()', () => {
 
             const { reader } = prepareLiveReader();
 
-            const playlist = await reader.fetch._requestPlaylistUpdate();
+            const playlist = await (reader.source.fetch as any)._requestPlaylistUpdate();
             expect(playlist).to.exist();
 
             const r = reader.getReader();
@@ -460,8 +494,8 @@ describe('HlsSegmentReadable()', () => {
 
         it('handles a temporary server outage', async () => {
 
-            const errors = [];
-            const { reader, state } = prepareLiveReader({ onProblem: errors.push.bind(errors) }, {
+            const problems: Error[] = [];
+            const { reader, state } = prepareLiveReader({ onProblem: problems.push.bind(problems) }, {
                 index() {
 
                     if (state.error === undefined && state.firstMsn === 5) {
@@ -493,8 +527,8 @@ describe('HlsSegmentReadable()', () => {
             }
 
             expect(segments).to.have.length(30);
-            expect(errors.length).to.be.greaterThan(0);
-            expect(errors[0]).to.be.an.error('Internal Server Error');
+            expect(problems.length).to.be.greaterThan(0);
+            expectCause(problems[0], 'Internal Server Error');
         });
 
         it('drops segments when reader is slow', async () => {
@@ -594,12 +628,12 @@ describe('HlsSegmentReadable()', () => {
                     }
                 });
 
-                let sourceReason;
-                const orig = reader.fetch.source.cancel;
-                reader.fetch.source.cancel = (reason) => {
+                let sourceReason: Error | undefined;
+                const orig = reader.source.fetch.source.cancel;
+                reader.source.fetch.source.cancel = (reason) => {
 
                     sourceReason = reason;
-                    return orig.call(reader.fetch.source, reason);
+                    return orig.call(reader.source.fetch.source, reason);
                 };
 
                 const r = reader.getReader();
@@ -616,7 +650,7 @@ describe('HlsSegmentReadable()', () => {
 
                 await r.closed;
 
-                expect(sourceReason.message).to.equal('destroyed');
+                expect(sourceReason?.message).to.equal('destroyed');
             });
         });
 
@@ -630,7 +664,7 @@ describe('HlsSegmentReadable()', () => {
 
                         const { error } = state;
                         if (error) {
-                            state.error++;
+                            state.error!++;
                             switch (error) {
                                 case 1:
                                 case 2:
@@ -655,12 +689,12 @@ describe('HlsSegmentReadable()', () => {
                     }
                 });
 
-                const errors = [];
-                const orig = reader.fetch.source.isRecoverableUpdateError;
-                reader.fetch.source.isRecoverableUpdateError = function (err) {
+                const problems: Error[] = [];
+                const orig = reader.source.fetch.source.isRecoverableUpdateError;
+                reader.source.fetch.source.isRecoverableUpdateError = function (err: Error) {
 
-                    errors.push(err);
-                    return orig.call(reader.fetch.source, err);
+                    problems.push(err);
+                    return orig.call(reader.source.fetch.source, err);
                 };
 
                 const segments = [];
@@ -669,20 +703,21 @@ describe('HlsSegmentReadable()', () => {
                     for await (const obj of reader) {
                         segments.push(obj);
                     }
-                })()).to.reject('Unauthorized');
+                })()).to.reject(Error);
+                expectCause(err, 'Unauthorized');
 
                 expect(segments.length).to.equal(14);
-                expect(errors).to.have.length(4);
-                expect(errors[0]).to.have.error('No line data');
-                expect(errors[1]).to.have.error(_Boom, 'Not Found');
-                expect(errors[2]).to.have.error(_Boom, 'Service Unavailable');
-                expect(errors[3]).to.shallow.equal(err);
+                expect(problems).to.have.length(4);
+                expectCause(problems[0], 'No line data');
+                expectCause(problems[1], 'Not Found');
+                expectCause(problems[2], 'Service Unavailable');
+                expect(problems[3]).to.shallow.equal(err);
             });
         });
 
         describe('with LL-HLS', () => {
 
-            const prepareLlReader = function (readerOptions = {}, state = {}, indexGen) {
+            const prepareLlReader = function (readerOptions: HlsSegmentFetcherOptions & HlsPlaylistFetcherOptions = {}, state: Partial<LlIndexState>, indexGen: ServerState['index']) {
 
                 return prepareLiveReader({
                     lowLatency: true,
@@ -696,8 +731,6 @@ describe('HlsSegmentReadable()', () => {
                 });
             };
 
-            const { genLlIndex } = Shared;
-
             it('handles a basic stream', async () => {
 
                 const { reader, state } = prepareLlReader({}, { partIndex: 4, end: { msn: 20, part: 3 } }, (query) => genLlIndex(query, state));
@@ -706,7 +739,7 @@ describe('HlsSegmentReadable()', () => {
                 const incrUpdates = () => updates++;
 
                 const segments = [];
-                const expected = { parts: state.partIndex, gens: 1 };
+                const expected = { parts: state.partIndex!, gens: 1 };
                 for await (const obj of reader) {
                     switch (obj.msn) {
                         case 10:
@@ -721,7 +754,7 @@ describe('HlsSegmentReadable()', () => {
 
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expected.parts);
-                    expect(obj.entry.parts[0].has('byterange')).to.be.false();
+                    expect(obj.entry.parts![0].has('byterange')).to.be.false();
                     expect(state.genCount).to.equal(expected.gens);
                     //expect(reader.hints.part).to.exist();
                     segments.push(obj);
@@ -744,7 +777,7 @@ describe('HlsSegmentReadable()', () => {
                 const incrUpdates = () => updates++;
 
                 const segments = [];
-                const expected = { parts: state.partIndex, gens: 1 };
+                const expected = { parts: state.partIndex!, gens: 1 };
                 for await (const obj of reader) {
                     switch (obj.msn) {
                         case 10:
@@ -759,7 +792,7 @@ describe('HlsSegmentReadable()', () => {
 
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expected.parts);
-                    expect(obj.entry.parts[0].has('byterange')).to.be.false();
+                    expect(obj.entry.parts![0].has('byterange')).to.be.false();
                     expect(state.genCount).to.equal(expected.gens);
                     //expect(reader.hints.part).to.exist();
                     segments.push(obj);
@@ -838,24 +871,24 @@ describe('HlsSegmentReadable()', () => {
                     const index = genLlIndex(query, state);
                     const firstMsn = index.media_sequence;
                     let segment;
-                    let offset;
+                    let offset = 0;
                     for (let msn = firstMsn; msn <= index.lastMsn(); ++msn) {     // eslint-disable-line @hapi/for-loop
-                        segment = index.getSegment(msn);
+                        segment = index.getSegment(msn)!;
                         offset = 0;
                         if (segment.parts) {
                             for (let j = 0; j < segment.parts.length; ++j) {
                                 const part = segment.parts[j];
                                 part.set('uri', `${msn}.ts`, 'string');
-                                part.set('byterange', { length: 800 + j, offset: j === 0 ? 0 : undefined }, 'byterange');
+                                part.set('byterange', { length: 800 + j, offset: j === 0 ? 0 : undefined }, AttrList.Types.Byterange);
                                 offset += 800 + j;
                             }
                         }
                     }
 
-                    if (index.meta.preload_hints) {
+                    if (segment && index.meta.preload_hints) {
                         const hint = index.meta.preload_hints[0];
-                        hint.set('uri', `${index.lastMsn() + +!segment.isPartial()}.ts`, 'string');
-                        hint.set('byterange-start', segment.isPartial() ? offset : 0, 'int');
+                        hint.set('uri', `${index.lastMsn() + +!segment.isPartial()}.ts`, AttrList.Types.String);
+                        hint.set('byterange-start', segment.isPartial() ? offset : 0, AttrList.Types.Int);
                     }
 
                     return index;
@@ -866,7 +899,7 @@ describe('HlsSegmentReadable()', () => {
                 for await (const obj of reader) {
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expectedParts);
-                    expect(obj.entry.parts[0].get('byterange')).to.include('@');
+                    expect(obj.entry.parts![0].get('byterange')).to.include('@');
                     segments.push(obj);
 
                     expectedParts = 1;
@@ -904,7 +937,7 @@ describe('HlsSegmentReadable()', () => {
                             expected.gens = 3;
                             break;
                         case 14:
-                            expected.parts = undefined;
+                            (<any>expected).parts = undefined;
                             expected.gens = 15;
                             expected.incr = 0;
                             break;

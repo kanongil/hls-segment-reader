@@ -1,6 +1,6 @@
 # HlsSegmentReader for node.js
 
-Read segments from any [Apple HLS](http://tools.ietf.org/html/draft-pantos-http-live-streaming) source in an object-mode `Readable`.
+Read segments from any [Apple HLS](http://tools.ietf.org/html/draft-pantos-http-live-streaming) source in an whatwg `ReadableStream`.
 
 ![Node.js CI](https://github.com/kanongil/node-hls-segment-reader/workflows/Node.js%20CI/badge.svg?event=push)
 

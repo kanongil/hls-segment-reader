@@ -1,24 +1,58 @@
-import { HlsSegmentReadable, HlsSegmentReaderOptions } from './segment-readable.js';
+import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
+import { M3U8Playlist, MediaPlaylist } from 'm3u8parse';
+import { HlsFetcherObject, HlsSegmentFetcher, HlsSegmentFetcherOptions } from './segment-fetcher.js';
+import { HlsSegmentReadable } from './segment-readable.js';
 import { HlsSegmentStreamer, HlsSegmentStreamerOptions } from './segment-streamer.js';
 
 export { HlsFetcherObject } from './segment-fetcher.js';
 export type { HlsIndexMeta } from 'hls-playlist-reader';
 export { HlsStreamerObject } from './segment-streamer.js';
 
-const createSimpleReader = function (uri: string, options: HlsSegmentReaderOptions & HlsSegmentStreamerOptions = {}): HlsSegmentStreamer {
+class UnendingPlaylistFetcher extends HlsPlaylistFetcher {
 
-    const reader = new HlsSegmentReadable(uri, options);
+    protected preprocessIndex<T extends M3U8Playlist>(index: T): T | undefined {
+
+        if (!index.master) {
+            MediaPlaylist.cast(index).ended = false;
+        }
+
+        return super.preprocessIndex(index);
+    }
+}
+
+interface SimpleReaderOptions extends HlsSegmentFetcherOptions, HlsSegmentStreamerOptions, HlsPlaylistFetcherOptions {
+
+    stopDate?: Date | string | number;
+}
+
+const createSimpleReader = function (uri: string, options: SimpleReaderOptions = {}): HlsSegmentStreamer {
 
     options.withData ?? (options.withData = false);
 
-    const streamer = new HlsSegmentStreamer(uri, options);
+    const playlistFetcherClass = options.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher;
 
-    //reader.on('problem', (err) => streamer.emit('problem', err));
+    let readable: ReadableStream<HlsFetcherObject> = new HlsSegmentReadable(new HlsSegmentFetcher(new playlistFetcherClass(uri, options), options));
+
+    if (options.stopDate) {
+        const stopDate = new Date(options.stopDate);
+        readable = readable.pipeThrough(new TransformStream({
+            transform(obj, controller) {
+
+                if ((obj.entry.program_time || 0) > stopDate) {
+                    return controller.terminate();
+                }
+
+                controller.enqueue(obj);
+            }
+        }));
+    }
+
+    const streamer = new HlsSegmentStreamer(readable, options);
 
     return streamer;
 };
 
 export { createSimpleReader, HlsSegmentReadable, HlsSegmentStreamer };
-export type { HlsSegmentReaderOptions, HlsSegmentStreamerOptions };
+export type { SimpleReaderOptions };
 
 export default createSimpleReader;
