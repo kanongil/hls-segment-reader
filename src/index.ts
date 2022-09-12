@@ -25,7 +25,7 @@ interface SimpleReaderOptions extends HlsSegmentFetcherOptions, HlsSegmentStream
     stopDate?: Date | string | number;
 }
 
-const createSimpleReader = function (uri: string, options: SimpleReaderOptions = {}): HlsSegmentStreamer {
+const createSimpleReader = function (uri: URL | string, options: SimpleReaderOptions = {}): HlsSegmentStreamer {
 
     options.withData ?? (options.withData = false);
 

@@ -7,7 +7,6 @@ import { M3U8Playlist, MediaPlaylist, MediaSegment, IndependentSegment, AttrList
 import { HlsIndexMeta, HlsPlaylistFetcher, PlaylistObject } from 'hls-playlist-reader/fetcher';
 import { AbortController, assert, Deferred, wait } from 'hls-playlist-reader/helpers';
 
-const WeakRef = globalThis.WeakRef ?? await import('./weakref.ponyfill.js');
 let setMaxListeners = (_n: number, _target: object) => undefined;
 if (typeof process === 'object') {
     setMaxListeners = (await import('node' + ':events')).setMaxListeners;
@@ -43,20 +42,27 @@ export class HlsFetcherObject {
 
     readonly msn: number;
     readonly isClosed: boolean;
+    readonly offset?: number;
     readonly baseUrl: string;
 
     onUpdate?: ((entry: IndependentSegment, old?: IndependentSegment) => void) = undefined;
 
     private _entry: IndependentSegment;
     #closed?: Deferred<true>;
-    #evicted = new AbortController();
+    #evicted: AbortSignal;
 
-    constructor(msn: number, segment: IndependentSegment, baseUrl: string) {
+    /**
+     * @param offset Segment offset in ms since startDate / start of the initial playlist
+     */
+    constructor(msn: number, segment: IndependentSegment, { offset, baseUrl, signal }: { baseUrl: string; offset?: number; signal: AbortSignal }) {
 
         this.msn = msn;
         this._entry = new MediaSegment(segment) as IndependentSegment;
         this.isClosed = !segment.isPartial();
+        this.offset = offset;
         this.baseUrl = baseUrl;
+
+        this.#evicted = signal;
     }
 
     get entry(): IndependentSegment {
@@ -104,12 +110,7 @@ export class HlsFetcherObject {
      */
     get evicted(): AbortSignal {
 
-        return this.#evicted.signal;
-    }
-
-    evict(reason?: Error): void {
-
-        this.#evicted.abort(reason);
+        return this.#evicted;
     }
 
     private _update(closed: boolean, old?: IndependentSegment): void {
@@ -164,7 +165,7 @@ export class HlsSegmentFetcher {
     #ac = new AbortController();
     #pending = false;
     #track = {
-        active: new Map<string, WeakRef<HlsFetcherObject>>(),
+        active: new Map<string, AbortController>(),
         gen: 0
     };
 
@@ -263,7 +264,7 @@ export class HlsSegmentFetcher {
     private async _feedFetcher(initial: Promise<PlaylistObject>) {
 
         const obj = await initial;
-        this.writeNext(obj);
+        this._updateIndex(obj);
 
         while (this.source.canUpdate()) {
 
@@ -274,7 +275,7 @@ export class HlsSegmentFetcher {
             }
 
             const update = await this.source.update({ timeout: this.stallAfterMs });
-            this.writeNext(update);
+            this._updateIndex(update);
         }
     }
 
@@ -288,7 +289,7 @@ export class HlsSegmentFetcher {
         return this.#nextPlaylist.promise;
     }
 
-    private writeNext(input: Readonly<PlaylistObject>): void {
+    private _updateIndex(input: Readonly<PlaylistObject>): void {
 
         const { index, playlist, meta } = input;
 
@@ -345,27 +346,39 @@ export class HlsSegmentFetcher {
 
         // eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
         const waitTime = previous?.target_duration ?? +index.target_duration! * 1000;
-        for (const [token, ref] of track.active) {
-            if (!incoming.has(token)) {
-                const segment = ref.deref();
-                if (segment) {
-
-                    // Wait one target duration before evicting
-
-                    wait(waitTime, { signal: this.#ac.signal })
-                        .then(() => ref.deref()?.evict(), (err) => ref.deref()?.evict(err));
-                }
+        for (const [token, ac] of track.active) {
+            if (incoming.has(token)) {
+                continue;
             }
+
+            // Wait one target duration before evicting
+
+            wait(waitTime, { signal: this.#ac.signal })
+                .then(() => ac.abort(), (err) => ac.abort(err));
+
+            track.active.delete(token);
         }
     }
 
     private _evictAll(reason?: Error) {
 
-        for (const ref of this.#track.active.values()) {
-            ref.deref()?.evict(reason);
+        for (const ac of this.#track.active.values()) {
+            ac.abort(reason);
         }
 
         this.#track.active.clear();
+    }
+
+    private _segmentOffset(segment: MediaSegment) {
+
+        if (segment.program_time && this.startDate) {
+            return +segment.program_time - +this.startDate;
+        }
+
+        // Fallback to track playlist evicted segment durations + current playlist offset
+        // This messes up the timeline on temporal discontinuities.
+
+        //return this.#track.offset +
     }
 
     async _getNextSegment() {
@@ -385,8 +398,10 @@ export class HlsSegmentFetcher {
                 result.segment.discontinuity = true;
             }
 
-            const obj = new HlsFetcherObject(result.ptr.msn, result.segment, this.source.baseUrl);
-            this.#track.active.set(`${this.#track.gen}-${obj.msn}`, new WeakRef(obj));
+            const ac = new AbortController();
+            const offset = this._segmentOffset(result.segment);
+            const obj = new HlsFetcherObject(result.ptr.msn, result.segment, { offset, baseUrl: this.source.baseUrl, signal: ac.signal });
+            this.#track.active.set(`${this.#track.gen}-${obj.msn}`, ac);
             this.#next = result.ptr.next();
 
             if (result.segment.isPartial()) {
@@ -455,6 +470,12 @@ export class HlsSegmentFetcher {
                 }
 
                 continue;         // Try again
+            }
+
+            // Set startDate if not yet specified
+
+            if (!this.startDate) {
+                this.startDate = segment.program_time ?? undefined;
             }
 
             return { ptr, discont, segment };

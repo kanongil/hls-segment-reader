@@ -136,6 +136,17 @@ describe('HlsSegmentStreamer()', () => {
             new(obj?: unknown): IndependentSegment;
         };
 
+        let ac: AbortController;
+        let opts: { baseUrl: string; signal: AbortSignal };
+
+        beforeEach(() => {
+
+            ac = new AbortController();
+            opts = { baseUrl: 'data:', signal: ac.signal };
+        });
+
+        afterEach(() => ac.abort());
+
         it('works', async () => {
 
             const fetcher = new FakeFetcher();
@@ -145,7 +156,7 @@ describe('HlsSegmentStreamer()', () => {
             fetcher.feed(new HlsFetcherObject(0, new IMediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
-            }), 'data:'));
+            }), opts));
 
             const obj = await nextValue(iter);
             expect(obj.type).to.equal('segment');
@@ -166,8 +177,8 @@ describe('HlsSegmentStreamer()', () => {
                 map: new AttrList({ uri: '"data:video/mp2t,MAP"', value: 'OK' })
             });
 
-            fetcher.feed(new HlsFetcherObject(0, segment, 'data:'));
-            fetcher.feed(new HlsFetcherObject(1, segment, 'data:'));
+            fetcher.feed(new HlsFetcherObject(0, segment, opts));
+            fetcher.feed(new HlsFetcherObject(1, segment, opts));
             fetcher.end();
 
             const segments = [];
@@ -194,12 +205,12 @@ describe('HlsSegmentStreamer()', () => {
                 duration: 2
             });
 
-            fetcher.feed(new HlsFetcherObject(0, segment, 'data:'));
-            fetcher.feed(new HlsFetcherObject(1, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP1"' }) }), 'data:'));
-            fetcher.feed(new HlsFetcherObject(2, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP2"' }) }), 'data:'));
-            fetcher.feed(new HlsFetcherObject(3, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '2@0' }) }), 'data:'));
-            fetcher.feed(new HlsFetcherObject(4, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '3@1' }) }), 'data:'));
-            fetcher.feed(new HlsFetcherObject(5, segment, 'data:'));
+            fetcher.feed(new HlsFetcherObject(0, segment, opts));
+            fetcher.feed(new HlsFetcherObject(1, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP1"' }) }), opts));
+            fetcher.feed(new HlsFetcherObject(2, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP2"' }) }), opts));
+            fetcher.feed(new HlsFetcherObject(3, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '2@0' }) }), opts));
+            fetcher.feed(new HlsFetcherObject(4, new IMediaSegment({ ...segment, map: new AttrList({ uri: '"data:video/mp2t,MAP3"', byterange: '3@1' }) }), opts));
+            fetcher.feed(new HlsFetcherObject(5, segment, opts));
             fetcher.end();
 
             const segments = [];
@@ -230,7 +241,7 @@ describe('HlsSegmentStreamer()', () => {
 
             const segment = new HlsFetcherObject(0, new IMediaSegment({
                 parts: [new AttrList(), new AttrList()]
-            }), 'data:');
+            }), opts);
 
             const waitingForClosed = new Promise((resolve) => {
 
@@ -267,7 +278,7 @@ describe('HlsSegmentStreamer()', () => {
 
             const segment = new HlsFetcherObject(0, new IMediaSegment({
                 parts: [new AttrList()]
-            }), 'data:');
+            }), opts);
 
             const waitingForClosed = new Promise((resolve) => {
 
@@ -303,7 +314,7 @@ describe('HlsSegmentStreamer()', () => {
 
             const segment = new HlsFetcherObject(0, new IMediaSegment({
                 parts: [new AttrList()]
-            }), 'data:');
+            }), opts);
 
             const waitingForClosed = new Promise((resolve) => {
 
@@ -318,7 +329,7 @@ describe('HlsSegmentStreamer()', () => {
             fetcher.feed(new HlsFetcherObject(1, new IMediaSegment({
                 uri: 'data:video/mp2t,TS',
                 duration: 2
-            }), 'data:'));
+            }), opts));
 
             const promise = nextValue(iter);
             expect(await Promise.race([waitingForClosed, promise])).to.equal('closed');

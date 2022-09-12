@@ -6,9 +6,6 @@ import { FetchResult, Byterange, performFetch } from 'hls-playlist-reader/helper
 import { AttrList } from 'm3u8parse';
 import { assert } from 'hls-playlist-reader/helpers';
 
-import { HlsSegmentReadable } from './index.js';
-import { HlsSegmentFetcher } from './segment-fetcher.js';
-
 try {
     // TODO: find better way to hook these
 
@@ -145,7 +142,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
         // Check for valid mime type
 
         if (!this.segmentMimeTypes.has(meta.mime.toLowerCase())) {
-            throw new Error(`Unsupported segment MIME type: ${meta.mime}`);
+            throw new Error(`Unsupported segment MIME type: ${meta.mime}`);         // FIXME: throwing here causes uncought AbortError?!?!
         }
     }
 
@@ -178,7 +175,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 fetch = await this._fetchFrom({ uri, byterange }, { baseUrl: segment.baseUrl, signal: segment.evicted });
                 assert(fetch.stream);
 
-                const [main, preload] = fetch.stream.tee();
+                const [main, preload] = (fetch.stream as ReadableStream).tee();
                 forward = main;
 
                 // Fully read a tee'ed stream to ensure it goes well
@@ -194,7 +191,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                     }
                 }
                 catch (err: any) {
-                    reader.cancel();
+                    reader.cancel().catch(() => undefined);
                     throw Object.assign(new Error('Failed to download map data: ' + err.message), {
                         httpStatus: err.name !== 'AbortError' ? 500 : undefined
                     });
@@ -204,7 +201,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 }
             }
             catch (err: any) {
-                forward?.cancel();
+                forward?.cancel().catch(() => undefined);
                 segment.evicted.throwIfAborted();
 
                 if (tries >= 4) {
@@ -294,7 +291,21 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             return;
         }
 
-        const obj = await this._fetchSegment(segment);
+        let obj: HlsStreamerObject;
+        if (segment.entry.gap) {
+
+            // Create an empty object
+
+            obj = new HlsStreamerObject({
+                url: new URL(segment.entry.uri!, segment.baseUrl).href,
+                mime: 'application/octet-stream',
+                size: -1,
+                modified: null
+            }, undefined, 'segment', segment);
+        }
+        else {
+            obj = await this._fetchSegment(segment);
+        }
 
         await map;      // Ensure that any init segment has been enqueued
         controller.enqueue(obj);
@@ -349,7 +360,7 @@ export class HlsSegmentStreamer extends ReadableStream<HlsStreamerObject> {
             }
 
             if (descriptor.value) {
-                descriptor.value = descriptor.value.bind(transform.readable);
+                descriptor.value = typeof descriptor.value === 'function' ? descriptor.value.bind(transform.readable) : descriptor.value;
             }
             else {
                 descriptor.get = descriptor.get?.bind(transform.readable);
