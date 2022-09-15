@@ -1,6 +1,6 @@
 /// <reference lib="es2021.weakref" />
 
-import type { ParsedPlaylist } from 'hls-playlist-reader/playlist';
+import type { ParsedPlaylist, PreloadHints } from 'hls-playlist-reader/playlist';
 
 import { M3U8Playlist, MediaPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
@@ -23,11 +23,7 @@ class SegmentPointer {
         this.part = part;
     }
 
-    next(isPartial = false): SegmentPointer {
-
-        if (isPartial) {
-            return new SegmentPointer(this.msn, undefined);
-        }
+    next(): SegmentPointer {
 
         return new SegmentPointer(this.msn + 1, this.part === undefined ? undefined : 0);
     }
@@ -38,12 +34,15 @@ class SegmentPointer {
     }
 }
 
+class HintedSegment extends MediaSegment {}
+
 export class HlsFetcherObject {
 
     readonly msn: number;
     readonly isClosed: boolean;
     readonly offset?: number;
     readonly baseUrl: string;
+    hints?: PreloadHints;
 
     onUpdate?: ((entry: IndependentSegment, old?: IndependentSegment) => void) = undefined;
 
@@ -113,6 +112,7 @@ export class HlsFetcherObject {
         return this.#evicted;
     }
 
+    /** Called when this.entry is set. */
     private _update(closed: boolean, old?: IndependentSegment): void {
 
         if (closed) {
@@ -122,8 +122,8 @@ export class HlsFetcherObject {
             }
         }
 
-        if (this.onUpdate) {
-            Promise.resolve().then(this.onUpdate.bind(this, this._entry, old));
+        if (!this.#evicted.aborted && this.onUpdate) {
+            Promise.resolve().then(this.onUpdate.bind(this, this._entry, old)).catch((err) => console.error('onUpdate error', err));
         }
     }
 }
@@ -299,7 +299,7 @@ export class HlsSegmentFetcher {
             return;
         }
 
-        assert(input.playlist);
+        assert(playlist);
 
         // Update evictions
 
@@ -309,7 +309,9 @@ export class HlsSegmentFetcher {
 
         if (this.#current) {
             const currentSegment = index.getSegment(this.#current.msn, true);
-            if (currentSegment && (currentSegment.isPartial() || currentSegment.parts)) {
+            if (currentSegment) {
+                this.#current.hints = currentSegment.isPartial() ? playlist.preloadHints : undefined;
+
                 this.#current.entry = currentSegment;
                 if (this.#current.isClosed) {
                     this.#current = null;
@@ -406,6 +408,8 @@ export class HlsSegmentFetcher {
 
             if (result.segment.isPartial()) {
 
+                obj.hints = this.#playlist!.preloadHints;
+
                 // Try to fetch remainder of segment parts (in the background)
 
                 this.#current = obj;
@@ -446,7 +450,7 @@ export class HlsSegmentFetcher {
                 ptr = this._initialSegmentPointer(playlist);
             }
             else if ((ptr.msn < playlist.index.startMsn(true)) ||
-                     (ptr.msn > (playlist.index.lastMsn(this.source.lowLatency) + 1))) {
+                     (ptr.msn > (playlist.index.lastMsn(this.source.lowLatency) + 1 + +(ptr.part === 0)))) {
 
                 // Playlist jump
 
@@ -467,6 +471,10 @@ export class HlsSegmentFetcher {
 
                 if (!playlist.index.isLive() || !this.source.canUpdate()) {
                     break;        // Done - nothing more to do
+                }
+
+                if (!segment && ptr.part !== undefined && playlist.preloadHints.part && ptr.msn === playlist.nextHead().msn) {
+                    return { ptr, discont, segment: new HintedSegment({ parts: [] }) as IndependentSegment };  // Return empty segment for upcoming hint
                 }
 
                 continue;         // Try again

@@ -747,16 +747,16 @@ describe('HlsSegmentReadable()', () => {
                             obj.onUpdate = incrUpdates;
                             break;
                         case 11:
-                            expected.parts = 1;
-                            expected.gens = 3;
+                            expected.parts = 0;
+                            expected.gens = 2;
                             break;
                     }
 
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expected.parts);
-                    expect(obj.entry.parts![0].has('byterange')).to.be.false();
+                    expect(obj.hints?.part).to.exist();
+
                     expect(state.genCount).to.equal(expected.gens);
-                    //expect(reader.hints.part).to.exist();
                     segments.push(obj);
 
                     expected.gens += 5;
@@ -764,9 +764,10 @@ describe('HlsSegmentReadable()', () => {
 
                 expect(segments.length).to.equal(11);
                 expect(segments[0].entry.parts).to.have.length(5);
+                expect(segments[0].hints?.part).to.not.exist();
+                expect(segments[0].entry.parts![0].has('byterange')).to.be.false();
                 expect(segments[10].entry.parts).to.have.length(3);
                 expect(updates).to.equal(1);
-                //expect(reader.hints.part).to.not.exist();
             });
 
             it('finishes partial segments (without another read())', async () => {
@@ -785,16 +786,16 @@ describe('HlsSegmentReadable()', () => {
                             obj.onUpdate = incrUpdates;
                             break;
                         case 11:
-                            expected.parts = 1;
-                            expected.gens = 3;
+                            expected.parts = 0;
+                            expected.gens = 2;
                             break;
                     }
 
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expected.parts);
-                    expect(obj.entry.parts![0].has('byterange')).to.be.false();
+                    expect(obj.hints?.part).to.exist();
+
                     expect(state.genCount).to.equal(expected.gens);
-                    //expect(reader.hints.part).to.exist();
                     segments.push(obj);
 
                     expected.gens += 5;
@@ -804,9 +805,10 @@ describe('HlsSegmentReadable()', () => {
 
                 expect(segments.length).to.equal(11);
                 expect(segments[0].entry.parts).to.have.length(5);
+                expect(segments[0].hints?.part).to.not.exist();
+                expect(segments[0].entry.parts![0].has('byterange')).to.be.false();
                 expect(segments[10].entry.parts).to.have.length(3);
                 expect(updates).to.equal(1);
-                //expect(reader.hints.part).to.not.exist();
             });
 
             it('ignores LL parts when lowLatency=false', async () => {
@@ -845,8 +847,8 @@ describe('HlsSegmentReadable()', () => {
                             expected.gens = 1;
                             break;
                         case 11:
-                            expected.parts = 1;
-                            expected.gens = 5;
+                            expected.parts = 0;
+                            expected.gens = 4;
                             break;
                     }
 
@@ -899,14 +901,14 @@ describe('HlsSegmentReadable()', () => {
                 for await (const obj of reader) {
                     expect(obj.msn).to.equal(segments.length + 10);
                     expect(obj.entry.parts).to.have.length(expectedParts);
-                    expect(obj.entry.parts![0].get('byterange')).to.include('@');
                     segments.push(obj);
 
-                    expectedParts = 1;
+                    expectedParts = 0;
                 }
 
                 expect(segments).to.have.length(11);
                 expect(segments[0].entry.parts).to.have.length(5);
+                expect(segments[0].entry.parts![0].get('byterange')).to.include('@');
                 expect(segments[10].entry.parts).to.have.length(3);
             });
 
@@ -933,8 +935,8 @@ describe('HlsSegmentReadable()', () => {
                             expected.parts = 4;
                             break;
                         case 11:
-                            expected.parts = 1;
-                            expected.gens = 3;
+                            expected.parts = 0;
+                            expected.gens = 2;
                             break;
                         case 14:
                             (<any>expected).parts = undefined;
@@ -948,8 +950,8 @@ describe('HlsSegmentReadable()', () => {
                             expected.parts = 4;
                             break;
                         case 19:
-                            expected.parts = 1;
-                            expected.gens = 17;
+                            expected.parts = 0;
+                            expected.gens = 16;
                             expected.incr = 5;
                             break;
                     }
@@ -970,7 +972,7 @@ describe('HlsSegmentReadable()', () => {
 
                 expect(segments.length).to.equal(11);
                 expect(segments[2].entry.parts).to.have.length(5);
-                expect(segments[3].entry.parts).to.have.length(2);
+                expect(segments[3].entry.parts).to.not.exist();
                 expect(segments[4].entry.parts).to.not.exist();
                 expect(segments[5].entry.parts).to.not.exist();
                 expect(segments[6].entry.parts).to.have.length(5);

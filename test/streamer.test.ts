@@ -32,7 +32,7 @@ const nextValue = async function<T> (iter: AsyncIterator<T>, expectDone = false)
 
     expect(done).to.equal(expectDone);
 
-    return value;
+    return value as T;
 };
 
 const devNull = async (stream?: ReadableStream) => {
@@ -114,7 +114,6 @@ describe('HlsSegmentStreamer()', () => {
             const r = createSimpleReader(`${server.info.uri}/simple/badtype.m3u8`, { withData: false });
 
             for await (const obj of r) {
-
                 expect(obj).to.exist();
             }
         })()).to.reject(Error, /Unsupported segment MIME type/);
@@ -124,7 +123,6 @@ describe('HlsSegmentStreamer()', () => {
             const r = createSimpleReader(`${server.info.uri}/simple/badtype-data.m3u8`, { withData: true });
 
             for await (const obj of r) {
-
                 expect(obj).to.exist();
             }
         })()).to.reject(Error, /Unsupported segment MIME type/);
@@ -160,7 +158,7 @@ describe('HlsSegmentStreamer()', () => {
 
             const obj = await nextValue(iter);
             expect(obj.type).to.equal('segment');
-            expect(obj.segment.msn).to.equal(0);
+            expect(obj.segment!.msn).to.equal(0);
 
             fetcher.end();
             await nextValue(iter, true);
@@ -243,104 +241,68 @@ describe('HlsSegmentStreamer()', () => {
                 parts: [new AttrList(), new AttrList()]
             }), opts);
 
-            const waitingForClosed = new Promise((resolve) => {
-
-                segment.closed = function () {
-
-                    process.nextTick(resolve, 'closed');
-                    return HlsFetcherObject.prototype.closed.call(this);
-                };
-            });
-
             fetcher.feed(segment);
 
-            const promise = nextValue(iter);
-            expect(await Promise.race([waitingForClosed, promise])).to.equal('closed');
-
-            segment.entry = new IMediaSegment({
-                ...segment.entry,
-                uri: 'data:video/mp2t,TS',
-                duration: 2
-            });
-
-            const obj = await promise;
+            const obj = await nextValue(iter);
             expect(obj.segment).to.equal(segment);
 
-            fetcher.end();
-            await nextValue(iter, true);
-        });
+            // Finalize
 
-        it('handles partial segments, where part is dropped', async () => {
+            process.nextTick(() => {
 
-            const fetcher = new FakeFetcher();
-            const streamer = new HlsSegmentStreamer(new HlsSegmentReadable(fetcher));
-            const iter = streamer[Symbol.asyncIterator]();
-
-            const segment = new HlsFetcherObject(0, new IMediaSegment({
-                parts: [new AttrList()]
-            }), opts);
-
-            const waitingForClosed = new Promise((resolve) => {
-
-                segment.closed = function () {
-
-                    process.nextTick(resolve, 'closed');
-                    return HlsFetcherObject.prototype.closed.call(this);
-                };
+                segment.entry = new IMediaSegment({
+                    ...segment.entry,
+                    uri: 'data:video/mp2t,TS',
+                    duration: 2
+                });
             });
 
-            fetcher.feed(segment);
-
-            const promise = nextValue(iter);
-            expect(await Promise.race([waitingForClosed, promise])).to.equal('closed');
-
-            segment.entry = new IMediaSegment({
-                uri: 'data:video/mp2t,TS',
-                duration: 2
-            });
-
-            const obj = await promise;
-            expect(obj.segment).to.equal(segment);
-
-            fetcher.end();
-            await nextValue(iter, true);
-        });
-
-        it('drops partial segments that are abandoned', async () => {
-
-            const fetcher = new FakeFetcher();
-            const streamer = new HlsSegmentStreamer(new HlsSegmentReadable(fetcher));
-            const iter = streamer[Symbol.asyncIterator]();
-
-            const segment = new HlsFetcherObject(0, new IMediaSegment({
-                parts: [new AttrList()]
-            }), opts);
-
-            const waitingForClosed = new Promise((resolve) => {
-
-                segment.closed = function () {
-
-                    process.nextTick(resolve, 'closed');
-                    return HlsFetcherObject.prototype.closed.call(this);
-                };
-            });
-
-            fetcher.feed(segment);
             fetcher.feed(new HlsFetcherObject(1, new IMediaSegment({
-                uri: 'data:video/mp2t,TS',
-                duration: 2
+                parts: [new AttrList(), new AttrList()]
             }), opts));
 
             const promise = nextValue(iter);
-            expect(await Promise.race([waitingForClosed, promise])).to.equal('closed');
+            expect(await Promise.race([segment.closed(), promise])).to.equal(true);
 
-            segment.close();
-
-            const obj = await promise;
-            expect(obj.type).to.equal('segment');
-            expect(obj.segment.msn).to.equal(1);
+            expect(obj.segment).to.equal(segment); // Updated to match new entry
+            expect((await promise).segment!.msn).to.equal(1);
 
             fetcher.end();
+            await nextValue(iter, true);
+        });
+
+        it('handles partial segments with part hint', async () => {
+
+            const fetcher = new FakeFetcher();
+            const streamer = new HlsSegmentStreamer(new HlsSegmentReadable(fetcher));
+            const iter = streamer[Symbol.asyncIterator]();
+
+            const segment1 = new HlsFetcherObject(0, new IMediaSegment({
+                parts: [new AttrList({ uri: '"data:video/mp2t,0.0"' }), new AttrList({ uri: '"data:video/mp2t,0.1"' })]
+            }), opts);
+
+            fetcher.feed(segment1);
+
+            const segment2 = new HlsFetcherObject(1, new IMediaSegment({
+                parts: []
+            }), opts);
+            segment2.hints = { part: { uri: 'data:video/mp2t,1.0' } };
+
+            fetcher.feed(segment2);
+
+            expect((await nextValue(iter)).segment).to.equal(segment1);
+            const promise = nextValue(iter);
+
+            await wait(1);
+
+            segment2.entry = new IMediaSegment({
+                parts: [new AttrList({ uri: '"data:video/mp2t,1.0"' })]
+            });
+            segment2.hints = { part: { uri: 'data:video/mp2t,1.1' } };
+
+            fetcher.end();
+
+            expect((await promise).segment).to.equal(segment2);
             await nextValue(iter, true);
         });
     });
