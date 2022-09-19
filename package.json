@@ -30,7 +30,7 @@
   "dependencies": {
     "@hapi/hoek": "^10.0.0",
     "hls-playlist-reader": "file:../node-hls-playlist-reader",
-    "m3u8parse": "^4.0.0-rc3"
+    "m3u8parse": "^4.0.0-rc4"
   },
   "devDependencies": {
     "@hapi/boom": "^10.0.0",

@@ -74,9 +74,9 @@ export class HlsFetcherObject {
         assert(!this.isClosed);
 
         const old = this._entry;
-        this._entry = new MediaSegment(entry) as IndependentSegment;
-
-        this._entry.discontinuity = !!(+entry.discontinuity | +old.discontinuity);
+        this._entry = Object.assign(new MediaSegment(entry), {
+            discontinuity: !!(+entry.discontinuity | +old.discontinuity)
+        }) as IndependentSegment;
 
         this._update(!entry.isPartial(), old);
     }
@@ -397,7 +397,7 @@ export class HlsSegmentFetcher {
             // Apply cross playlist discontinuity
 
             if (result.discont) {
-                result.segment.discontinuity = true;
+                result.segment = new MediaSegment({ ...result.segment, discontinuity: true }) as IndependentSegment;
             }
 
             const ac = new AbortController();
@@ -407,7 +407,6 @@ export class HlsSegmentFetcher {
             this.#next = result.ptr.next();
 
             if (result.segment.isPartial()) {
-
                 obj.hints = this.#playlist!.preloadHints;
 
                 // Try to fetch remainder of segment parts (in the background)
