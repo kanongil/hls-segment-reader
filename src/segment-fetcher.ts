@@ -12,6 +12,23 @@ if (typeof process === 'object') {
     setMaxListeners = (await import('node' + ':events')).setMaxListeners;
 }
 
+interface AbortSignal<T = any> extends globalThis.AbortSignal {
+    readonly reason: T;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+interface AbortController<T = any> extends globalThis.AbortController {
+    readonly signal: AbortSignal<T>;
+    abort(reason?: T): void;
+}
+
+
+export enum EvictionReason {
+    /** The segment has been evicted in the latest playlist update. */
+    Expired = 'expired'
+}
+
+
 class SegmentPointer {
 
     readonly msn: number;
@@ -48,7 +65,7 @@ export class HlsFetcherObject {
 
     private _entry: IndependentSegment;
     #closed?: Deferred<true>;
-    #evicted: AbortSignal;
+    #evicted: AbortSignal<EvictionReason | Error>;
 
     /**
      * @param offset Segment offset in ms since startDate / start of the initial playlist
@@ -106,8 +123,11 @@ export class HlsFetcherObject {
 
     /**
      * Triggers if the segment data is no longer retrievable.
+     *
+     * The trigger reason will be `'expired'` to signal that the segment
+     * is no longer part of the playlist, or an Error.
      */
-    get evicted(): AbortSignal {
+    get evicted(): AbortSignal<EvictionReason | Error> {
 
         return this.#evicted;
     }
@@ -143,10 +163,22 @@ export type HlsSegmentFetcherOptions = {
     onProblem?: (err: Error) => void;
 };
 
-
 /**
  * Reads an HLS media playlist, and output segments in order.
- * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
+ * Live & Event playlists are refreshed as needed, and expired segments are dropped when next() is
+ * not called in a timely manner.
+ *
+ * The processing can end in multiple ways:
+ *  - regular end of playlist, and all segments have been returned - signalled with a `null` return
+ *  - unrecoverable source playlist error (network / malformed content / timeout)
+ *  - a user cancel()
+ *
+ * Any irregular processing stop, will cause the active/next call to next() to reject with an `Error`.
+ * This will cause any segment entries that are pending to be returned, to be dropped.
+ *
+ * The returned objects are tracked for segment evictions. The evicted signal will trigger when a
+ * segment is no longer available in the latest playlist update, or with an `Error` if the
+ * processing is ended.
  */
 export class HlsSegmentFetcher {
 
@@ -165,7 +197,7 @@ export class HlsSegmentFetcher {
     #ac = new AbortController();
     #pending = false;
     #track = {
-        active: new Map<string, AbortController>(),
+        active: new Map<string, AbortController<EvictionReason | Error>>(),
         gen: 0
     };
 
@@ -202,7 +234,7 @@ export class HlsSegmentFetcher {
 
         // Track aborted to immediately evict all segments
 
-        this.#ac.signal.addEventListener('abort', () => this._evictAll(this.#ac.signal.reason), { once: true });
+        this.#ac.signal.addEventListener('abort', () => this.#evictAll(this.#ac.signal.reason), { once: true });
 
         // Start feed fetcher
 
@@ -210,7 +242,7 @@ export class HlsSegmentFetcher {
         this._feedFetcher(promise).catch((err) => {
 
             this.#nextPlaylist.reject(err);
-            this._evictAll(err);            // TODO: make this eviction optional?
+            this.#evictAll(err);            // TODO: make this eviction optional?
         });
 
         return promise.then((obj) => obj.index);
@@ -232,12 +264,7 @@ export class HlsSegmentFetcher {
             .finally(() => this.#pending = false);
     }
 
-    finalize({ timeout = 30_000 } = {}): Promise<void> {    // FIXME: is the method useful?
-
-        return wait(timeout, { signal: this.#ac.signal })
-            .then(() => this.cancel());
-    }
-
+    /** A cancel() indicates loss of interest from consumer. */
     cancel(reason?: Error): void {
 
         if (this.#ac.signal.aborted) {
@@ -356,13 +383,13 @@ export class HlsSegmentFetcher {
             // Wait one target duration before evicting
 
             wait(waitTime, { signal: this.#ac.signal })
-                .then(() => ac.abort(), (err) => ac.abort(err));
+                .then(() => ac.abort(EvictionReason.Expired), (err) => ac.abort(err));
 
             track.active.delete(token);
         }
     }
 
-    private _evictAll(reason?: Error) {
+    #evictAll(reason: EvictionReason | Error) {
 
         for (const ac of this.#track.active.values()) {
             ac.abort(reason);
