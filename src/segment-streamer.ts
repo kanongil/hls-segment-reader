@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 
 import type { HlsFetcherObject } from './index.js';
-import { FetchResult, Byterange, performFetch } from 'hls-playlist-reader/helpers';
+import { Byterange, cancelFetch, performFetch } from 'hls-playlist-reader/helpers';
 
 import { AttrList } from 'm3u8parse';
 import { assert } from 'hls-playlist-reader/helpers';
@@ -49,18 +49,21 @@ const internals = {
 };
 
 
+type FetchResult = Awaited<ReturnType<typeof performFetch>>;
+
+
 export class HlsStreamerObject {
 
     type: 'segment' | 'map';
     file: FetchResult['meta'];
-    stream?: ReadableStream<Uint8Array>;
+    stream?: FetchResult['stream'];
     segment?: HlsFetcherObject;
     attrs?: AttrList;
 
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'map', details: AttrList);
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment', details: HlsFetcherObject);
+    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'map', details: AttrList);
+    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'segment', details: HlsFetcherObject);
 
-    constructor(fileMeta: FetchResult['meta'], stream: ReadableStream | undefined, type: 'segment' | 'map', details: HlsFetcherObject | AttrList) {
+    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'segment' | 'map', details: HlsFetcherObject | AttrList) {
 
         const isSegment = type === 'segment';
 
@@ -168,7 +171,6 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
         let fetch: FetchResult | undefined;
         let tries = 0;
-        let forward: ReadableStream | undefined;
         do {
             try {
                 tries++;
@@ -179,38 +181,26 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                     this.validateSegmentMeta(fetch.meta);
                 }
                 catch (err) {
-                    fetch.stream?.cancel?.();
                     tries = Infinity;  // Don't retry
                     throw err;
                 }
 
-                const [main, preload] = (fetch.stream as ReadableStream).tee();
-                forward = main;
+                // Fully buffer stream to ensure it goes well
 
-                // Fully read a tee'ed stream to ensure it goes well
-
-                const reader = preload.getReader();
                 try {
-                    for (;;) {
-                        const { done } = await reader.read();
-                        assert(!this.#ended, 'ended');
-                        if (done) {
-                            break;
-                        }
-                    }
+                    await fetch.completed;
+                    segment.evicted.throwIfAborted();
                 }
                 catch (err: any) {
-                    reader.cancel().catch(() => undefined);
                     throw Object.assign(new Error('Failed to download map data: ' + err.message), {
                         httpStatus: err.name !== 'AbortError' ? 500 : undefined
                     });
                 }
-                finally {
-                    reader.releaseLock();
-                }
             }
             catch (err: any) {
-                forward?.cancel().catch(() => undefined);
+                cancelFetch(fetch);
+                fetch = undefined;
+
                 segment.evicted.throwIfAborted();
 
                 if (tries >= 4) {
@@ -226,17 +216,16 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 await new Promise((resolve) => setTimeout(resolve, 200 * (segment.entry.duration || 4)));
                 assert(!this.#ended, 'ended');
             }
-        } while (!(fetch && forward));
+        } while (!fetch);
 
         assert(!this.#ended, 'ended');
 
-        return new HlsStreamerObject(fetch.meta, forward, 'map', segment.entry.map);
+        return new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment.entry.map);
     }
 
     private async _fetchSegment(segment: HlsFetcherObject): Promise<HlsStreamerObject> {
 
-        const fetch = await this._fetchFrom({ uri: segment.entry.uri!, byterange: segment.entry.byterange }, { baseUrl: segment.baseUrl, signal: segment.evicted });
-        let stream = fetch.stream;
+        let fetch: FetchResult | undefined = await this._fetchFrom({ uri: segment.entry.uri!, byterange: segment.entry.byterange }, { baseUrl: segment.baseUrl, signal: segment.evicted });
 
         // At this point object.stream has only been readied / opened
 
@@ -264,14 +253,14 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 }
             }*/
 
-            const obj = new HlsStreamerObject(fetch.meta, stream, 'segment', segment);
-            stream = undefined;     // Claimed - don't cancel
+            const obj = new HlsStreamerObject(fetch.meta, fetch.stream, 'segment', segment);
+            fetch = undefined;     // Claimed - don't cancel
 
             this.#started = true;
             return obj;
         }
         finally {
-            stream?.cancel();
+            cancelFetch(fetch);
         }
     }
 

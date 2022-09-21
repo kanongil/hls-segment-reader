@@ -1,6 +1,8 @@
 import { AbortablePromise, assert, Deferred, performFetch } from 'hls-playlist-reader/helpers';
-import type { Byterange, FetchResult } from 'hls-playlist-reader/helpers';
+import type { Byterange } from 'hls-playlist-reader/helpers';
 import { PreloadHints } from 'hls-playlist-reader/playlist';
+
+type FetchResult = Awaited<ReturnType<typeof performFetch>>;
 
 type ExtendedFetch = AbortablePromise<FetchResult & { part: Part }>;
 
@@ -148,7 +150,7 @@ class PartStreamImpl<T extends object> {
         if (!active) {
             for (const fetch of this.#fetches) {
                 const { stream, part } = await fetch;
-                await this._feedPart(stream, part);
+                await this._feedPart(stream as T, part);
             }
 
             this.#fetches = [];
@@ -219,6 +221,7 @@ class PartStreamImpl<T extends object> {
                         size: -1,
                         modified: null
                     },
+                    completed: Promise.resolve(),
                     part
                 }), { abort: () => undefined });
             }
