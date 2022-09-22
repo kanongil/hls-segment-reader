@@ -142,8 +142,13 @@ export class HlsFetcherObject {
             }
         }
 
-        if (!this.#evicted.aborted && this.onUpdate) {
-            Promise.resolve().then(this.onUpdate.bind(this, this._entry, old)).catch((err) => console.error('onUpdate error', err));
+        if (this.onUpdate) {
+            Promise.resolve().then(this.onUpdate.bind(this, this._entry, old)).catch((err) => {
+
+                if (err.name !== 'AbortError') {
+                    console.error('Unexpected onUpdate error', err);
+                }
+            });
         }
     }
 }
