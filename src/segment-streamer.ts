@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 
 import type { HlsFetcherObject } from './index.js';
-import { Byterange, cancelFetch, performFetch } from 'hls-playlist-reader/helpers';
+import { Byterange, cancelFetch, IDownloadTracker, performFetch } from 'hls-playlist-reader/helpers';
 
 import { AttrList } from 'm3u8parse';
 import { assert } from 'hls-playlist-reader/helpers';
@@ -84,6 +84,8 @@ export interface HlsSegmentStreamerOptions {
     withData?: boolean; // default true
     highWaterMark?: number;
 
+    downloadTracker?: IDownloadTracker;
+
     onProblem?: (err: Error) => void;
 }
 
@@ -92,6 +94,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
     readonly withData: boolean;
     readonly transforms = 0;
+    readonly downloadTracker?: IDownloadTracker;
 
     #readState = new (class ReadState {
         indexTokens = new Set<number | string>();
@@ -106,6 +109,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
     constructor(options: Omit<HlsSegmentStreamerOptions, 'highWaterMark'> = {}) {
 
         this.withData = options.withData ?? true;
+        this.downloadTracker = options.downloadTracker;
 
         if (options.onProblem) {
             this.onProblem = options.onProblem;
@@ -266,7 +270,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
     private async _fetchParts(segment: HlsFetcherObject): Promise<HlsStreamerObject> {
 
-        let stream: PartStream | undefined = new PartStream({ baseUrl: segment.baseUrl, signal: segment.evicted });
+        let stream: PartStream | undefined = new PartStream({ baseUrl: segment.baseUrl, signal: segment.evicted, tracker: this.downloadTracker });
 
         const getPartData = (part: AttrList) => ({
             uri: part.get('uri', AttrList.Types.String)!,
@@ -367,7 +371,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
     private async _fetchFrom(entry: { uri: string; byterange?: Required<Byterange> }, { baseUrl, signal }: { baseUrl: string; signal: AbortSignal }) {
 
         const { uri, byterange } = entry;
-        return await performFetch(new URL(uri, baseUrl), { byterange, retries: 2, signal });
+        return await performFetch(new URL(uri, baseUrl), { byterange, retries: 2, signal, tracker: this.downloadTracker });
     }
 }
 

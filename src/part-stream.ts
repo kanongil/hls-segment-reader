@@ -1,4 +1,4 @@
-import { AbortablePromise, assert, Deferred, performFetch } from 'hls-playlist-reader/helpers';
+import { AbortablePromise, assert, Deferred, IDownloadTracker, performFetch } from 'hls-playlist-reader/helpers';
 import type { Byterange } from 'hls-playlist-reader/helpers';
 import { PreloadHints } from 'hls-playlist-reader/playlist';
 
@@ -27,6 +27,7 @@ export type Part = {
 interface PartStreamOptions {
     baseUrl: string;
     signal: AbortSignal;
+    tracker?: IDownloadTracker;
 }
 
 class PartStreamImpl<T extends object> {
@@ -38,13 +39,15 @@ class PartStreamImpl<T extends object> {
     #hint?: Hint;
     #baseUrl: string;
     #signal: AbortSignal;
+    #tracker?: IDownloadTracker;
     #feed: (err?: Error, stream?: T) => Promise<void>;
 
-    constructor(feedFn: (err?: Error, stream?: T) => Promise<void>, { baseUrl, signal }: PartStreamOptions) {
+    constructor(feedFn: (err?: Error, stream?: T) => Promise<void>, { baseUrl, signal, tracker }: PartStreamOptions) {
 
         this.#feed = feedFn;
         this.#baseUrl = baseUrl;
         this.#signal = signal;
+        this.#tracker = tracker;
     }
 
     addParts(parts: Part[], final = false) {
@@ -92,7 +95,8 @@ class PartStreamImpl<T extends object> {
             }
 
             if (hint) {
-                const fetch = performFetch(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal });
+                // TODO: signal blocking!!!
+                const fetch = performFetch(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal, tracker: this.#tracker });
                 fetch.catch(() => undefined);
                 this.#hint = { part: hint, fetch };
             }
@@ -226,7 +230,7 @@ class PartStreamImpl<T extends object> {
                 }), { abort: () => undefined });
             }
 
-            fetch = performFetch(new URL(part.uri, this.#baseUrl), { byterange: part.byterange, signal: this.#signal });
+            fetch = performFetch(new URL(part.uri, this.#baseUrl), { byterange: part.byterange, signal: this.#signal, tracker: this.#tracker });
         }
 
         return Object.assign(fetch.then((fetchResult) => ({ ...fetchResult, part })), {
