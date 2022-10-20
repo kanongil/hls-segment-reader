@@ -56,27 +56,20 @@ export class HlsStreamerObject {
 
     type: 'segment' | 'map';
     file: FetchResult['meta'];
+    segment: Readonly<HlsFetcherObject>;
     stream?: FetchResult['stream'];
-    segment?: HlsFetcherObject;
-    attrs?: AttrList;
 
-    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'map', details: AttrList);
-    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'segment', details: HlsFetcherObject);
+    get attrs(): AttrList | undefined {
 
-    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'segment' | 'map', details: HlsFetcherObject | AttrList) {
+        return this.segment.entry.map;
+    }
 
-        const isSegment = type === 'segment';
+    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'segment' | 'map', details: Readonly<HlsFetcherObject>) {
 
         this.type = type;
         this.file = fileMeta;
         this.stream = stream;
-
-        if (isSegment) {
-            this.segment = details as HlsFetcherObject;
-        }
-        else {
-            this.attrs = details as AttrList;
-        }
+        this.segment = details;
     }
 }
 
@@ -224,7 +217,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
         assert(!this.#ended, 'ended');
 
-        return new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment.entry.map);
+        return new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment);
     }
 
     private async _fetchSegment(segment: HlsFetcherObject): Promise<HlsStreamerObject> {
