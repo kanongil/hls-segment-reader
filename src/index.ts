@@ -25,13 +25,14 @@ interface SimpleReaderOptions extends HlsSegmentFetcherOptions, HlsSegmentStream
     stopDate?: Date | string | number;
 }
 
-const createSimpleReader = function (uri: URL | string, options: SimpleReaderOptions = {}): HlsSegmentStreamer {
+const createSimpleReader = function (uri: URL | string, options: SimpleReaderOptions = {}): HlsSegmentStreamer & { fetcher: HlsSegmentFetcher } {
 
     options.withData ?? (options.withData = false);
 
     const playlistFetcherClass = options.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher;
 
-    let readable: ReadableStream<HlsFetcherObject> = new HlsSegmentReadable(new HlsSegmentFetcher(new playlistFetcherClass(uri, options), options));
+    const fetcher = new HlsSegmentFetcher(new playlistFetcherClass(uri, options), options);
+    let readable: ReadableStream<HlsFetcherObject> = new HlsSegmentReadable(fetcher);
 
     if (options.stopDate) {
         const stopDate = new Date(options.stopDate);
@@ -49,7 +50,7 @@ const createSimpleReader = function (uri: URL | string, options: SimpleReaderOpt
 
     const streamer = new HlsSegmentStreamer(readable, options);
 
-    return streamer;
+    return Object.assign(streamer, { fetcher });
 };
 
 export { createSimpleReader, HlsSegmentReadable, HlsSegmentStreamer };
