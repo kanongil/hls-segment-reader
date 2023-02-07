@@ -95,8 +95,8 @@ class PartStreamImpl<T extends object> {
             }
 
             if (hint) {
-                // TODO: signal blocking!!!
-                const fetch = performFetch(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal, tracker: this.#tracker });
+                const blocking = 'hint+' + this.#baseUrl;
+                const fetch = performFetch(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal, tracker: this.#tracker, blocking });
                 fetch.catch(() => undefined);
                 this.#hint = { part: hint, fetch };
             }
