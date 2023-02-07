@@ -542,8 +542,7 @@ export class HlsSegmentFetcher {
                 if (segment.uri) {
                     partHoldBack -= segment.duration || 0;
                 }
-                else {
-                    assert(segment.parts);
+                else if (segment.parts) {
                     partHoldBack -= segment.parts.reduce((duration, part) => duration + part.get('duration', AttrList.Types.Float)!, 0);
                 }
 
