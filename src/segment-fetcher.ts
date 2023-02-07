@@ -1,5 +1,3 @@
-/// <reference lib="es2021.weakref" />
-
 import type { ParsedPlaylist, PreloadHints } from 'hls-playlist-reader/playlist';
 
 import { M3U8Playlist, MediaPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
