@@ -24,13 +24,15 @@ export type Part = {
     hint?: Hint;
 };
 
-interface PartStreamOptions {
+export interface PartStreamOptions {
     baseUrl: string;
     signal: AbortSignal;
     tracker?: IDownloadTracker;
 }
 
-class PartStreamImpl<T extends object> {
+type FeedFn<T> = (err?: Error, stream?: T, final?: boolean) => Promise<void> | void;
+
+export class PartStreamImpl<T extends object> {
 
     #queuedParts: Part[] = [];
     #fetches: ExtendedFetch[] = [];
@@ -40,9 +42,9 @@ class PartStreamImpl<T extends object> {
     #baseUrl: string;
     #signal: AbortSignal;
     #tracker?: IDownloadTracker;
-    #feed: (err?: Error, stream?: T) => Promise<void>;
+    #feed: FeedFn<T>;
 
-    constructor(feedFn: (err?: Error, stream?: T) => Promise<void>, { baseUrl, signal, tracker }: PartStreamOptions) {
+    constructor(feedFn: FeedFn<T>, { baseUrl, signal, tracker }: PartStreamOptions) {
 
         this.#feed = feedFn;
         this.#baseUrl = baseUrl;
@@ -242,14 +244,11 @@ class PartStreamImpl<T extends object> {
 
         // TODO: only feed part.byterange.length in case it is longer??
 
-        await this.#feed(undefined, stream);
-        if (part.final) {
-            return this.#feed();
-        }
+        await this.#feed(undefined, stream, part.final === true);
     }
 }
 
-export class PartStream extends ReadableStream {
+/*export class PartStream extends ReadableStream {
 
     #impl: PartStreamImpl<ReadableStream<Uint8Array>>;
 
@@ -264,17 +263,13 @@ export class PartStream extends ReadableStream {
 
         const transform = new TransformStream();
 
-        this.#impl = new PartStreamImpl<ReadableStream<Uint8Array>>((err, stream) => {
+        this.#impl = new PartStreamImpl<ReadableStream<Uint8Array>>((err, stream, final) => {
 
             if (err) {
                 return transform.writable.abort(err);
             }
 
-            if (stream) {
-                return stream.pipeTo(transform.writable, { preventClose: true });
-            }
-
-            return transform.writable.close().catch(() => undefined);
+            return stream!.pipeTo(transform.writable, { preventClose: !final });
         }, options);
 
         // Mirror transform ReadableStream
@@ -312,4 +307,50 @@ export class PartStream extends ReadableStream {
 
         this.#impl.setHint({ ...hint.part, type: 'PART' });
     }
-}
+}*/
+
+// eslint-disable-next-line @typescript-eslint/ban-types
+type Constructor = new (...args: any[]) => {};
+
+export const partStreamSetup = function <T extends object, TBase extends Constructor>(Base: TBase) {
+
+    return class PartStream extends Base {
+
+        #impl: PartStreamImpl<T> = {} as any as PartStreamImpl<T>;
+
+        get meta(): Promise<FetchResult['meta']> {
+
+            return this.#impl.meta();
+        }
+
+        constructor(...args: any[]) {
+
+            super();
+
+            const options = args[0] as PartStreamOptions;
+            this.#impl = new PartStreamImpl<T>(this._feedPart.bind(this), options);
+        }
+
+        append(parts: Part[], final = false): void {
+
+            this.#impl.addParts(parts, final);
+        }
+
+        hint(hint?: PreloadHints): void {
+
+            if (!hint) {
+                return;
+            }
+
+            assert(!hint.map, 'MAP hint is not supported');
+            assert(hint.part, 'PART hint is required');
+
+            this.#impl.setHint({ ...hint.part, type: 'PART' });
+        }
+
+        _feedPart(_err?: Error, stream?: T, final?: boolean): Promise<void> | void {
+
+            throw new Error('Must be subclassed');
+        }
+    };
+};

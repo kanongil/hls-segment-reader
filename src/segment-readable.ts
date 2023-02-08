@@ -5,7 +5,7 @@ import { assert } from 'hls-playlist-reader/helpers';
 import { HlsFetcherObject, HlsSegmentFetcher } from './segment-fetcher.js';
 
 
-class HlsSegmentSource implements UnderlyingSource<HlsFetcherObject> {
+class HlsSegmentSource /*implements UnderlyingSource<HlsFetcherObject>*/ {
 
     fetch: HlsSegmentFetcher;
 

@@ -5,7 +5,7 @@ import { Byterange, cancelFetch, IDownloadTracker, performFetch } from 'hls-play
 
 import { AttrList } from 'm3u8parse';
 import { assert } from 'hls-playlist-reader/helpers';
-import { PartStream } from './part-stream.js';
+import { PartStream } from './part-stream.node.js';
 
 try {
     // TODO: find better way to hook these
@@ -185,6 +185,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 // Fully buffer stream to ensure it goes well
 
                 try {
+                    fetch.stream.resume();
                     await fetch.completed;
                     segment.evicted.throwIfAborted();
                 }
@@ -295,12 +296,13 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
             // Prepare parts
 
-            assert(segment.entry.parts);
+            if (segment.entry.parts) {
+                updateStream.append(segment.entry.parts.map(getPartData));
+            }
 
-            stream.append(segment.entry.parts.map(getPartData));
-            stream.hint(segment.hints!);
+            updateStream.hint(segment.hints!);
 
-            const meta = await stream.meta;
+            const meta = await updateStream.meta;
             assert(!this.#ended, 'ended');
 
             const obj = new HlsStreamerObject(meta, stream, 'segment', segment);
@@ -310,7 +312,8 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             return obj;
         }
         finally {
-            stream?.cancel();
+            stream?.destroy();
+            //stream?.cancel();
         }
     }
 

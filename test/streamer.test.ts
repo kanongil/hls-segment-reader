@@ -1,4 +1,6 @@
 import { createHash } from 'crypto';
+import { Readable, pipeline } from 'stream';
+import { promisify } from 'util';
 
 import { expect } from '@hapi/code';
 import { wait } from '@hapi/hoek';
@@ -35,24 +37,32 @@ const nextValue = async function<T> (iter: AsyncIterator<T>, expectDone = false)
     return value as T;
 };
 
-const devNull = async (stream?: ReadableStream) => {
+const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
 
-    if (!stream) {
-        return Promise.reject('No stream');
+    if (stream instanceof ReadableStream) {
+        return new Promise<number>((resolve, reject) => {
+
+            let consumed = 0;
+            stream.pipeTo(new WritableStream<Uint8Array>({
+                abort: reject,
+                write(c) {
+
+                    consumed += c.byteLength;
+                },
+                close: () => resolve(consumed)
+            }));
+        });
+    }
+    else if (stream instanceof Readable) {
+        let consumed = 0;
+        for await (const chunk of stream) {
+            consumed += chunk.byteLength;
+        }
+
+        return consumed;
     }
 
-    return new Promise<number>((resolve, reject) => {
-
-        let consumed = 0;
-        stream.pipeTo(new WritableStream<Uint8Array>({
-            abort: reject,
-            write(c) {
-
-                consumed += c.byteLength;
-            },
-            close: () => resolve(consumed)
-        }));
-    });
+    throw new Error('Missing or invalid stream');
 };
 
 
@@ -337,12 +347,17 @@ describe('HlsSegmentStreamer()', () => {
             for await (const obj of r) {
                 const hasher = createHash('sha1');
 
-                await obj.stream?.pipeTo(new WritableStream({
-                    write(chunk) {
+                if (obj.stream instanceof ReadableStream) {
+                    await obj.stream.pipeTo(new WritableStream({
+                        write(chunk) {
 
-                        hasher.update(chunk);
-                    }
-                }));
+                            hasher.update(chunk);
+                        }
+                    }));
+                }
+                else if (obj.stream instanceof Readable) {
+                    await promisify(pipeline)(obj.stream, hasher);
+                }
 
                 checksums.push(hasher.digest().toString('hex'));
             }
