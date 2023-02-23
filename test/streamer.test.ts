@@ -11,7 +11,7 @@ import { provisionServer, provisionLiveServer, genIndex, ServerState, Unprotecte
 import { createSimpleReader, HlsFetcherObject, HlsSegmentReadable, HlsSegmentStreamer, HlsStreamerObject } from '../lib/index.js';
 import { HlsSegmentStreamerOptions } from '../lib/segment-streamer.js';
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, Deferred, webstreamImpl as WS } from 'hls-playlist-reader/helpers';
 import { HlsSegmentFetcher, HlsSegmentFetcherOptions } from '../lib/segment-fetcher.js';
 
 
@@ -38,11 +38,11 @@ const nextValue = async function<T> (iter: AsyncIterator<T>, expectDone = false)
 
 const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
 
-    if (stream instanceof ReadableStream) {
+    if (stream instanceof WS.ReadableStream) {
         return new Promise<number>((resolve, reject) => {
 
             let consumed = 0;
-            stream.pipeTo(new WritableStream<Uint8Array>({
+            stream.pipeTo(new WS.WritableStream<Uint8Array>({
                 abort: reject,
                 write(c) {
 
@@ -105,7 +105,7 @@ describe('HlsSegmentStreamer()', () => {
 
         it('creates a valid object', () => {
 
-            const r = new HlsSegmentStreamer(new ReadableStream());
+            const r = new HlsSegmentStreamer(new WS.ReadableStream());
 
             expect(r).to.be.instanceOf(HlsSegmentStreamer);
         });
@@ -348,8 +348,8 @@ describe('HlsSegmentStreamer()', () => {
             for await (const obj of r) {
                 const hasher = createHash('sha1');
 
-                if (obj.stream instanceof ReadableStream) {
-                    await obj.stream.pipeTo(new WritableStream({
+                if (obj.stream instanceof WS.ReadableStream) {
+                    await obj.stream.pipeTo(new WS.WritableStream({
                         write(chunk) {
 
                             hasher.update(chunk);

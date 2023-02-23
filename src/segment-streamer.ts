@@ -5,7 +5,7 @@ import type { HlsFetcherObject } from './index.js';
 import type { PartStreamCtor } from './part-stream.js';
 
 import { AttrList } from 'm3u8parse';
-import { assert, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
+import { assert, webstreamImpl as WS, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
 import { ContentFetcher as ContentFetcherWeb } from 'hls-playlist-reader/helpers.web';
 
 try {
@@ -392,7 +392,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 }
 
 
-export class HlsSegmentStreamer extends ReadableStream<HlsStreamerObject> {
+export class HlsSegmentStreamer extends WS.ReadableStream<HlsStreamerObject> {
 
     readonly source: HlsSegmentDataSource;
 
@@ -401,10 +401,10 @@ export class HlsSegmentStreamer extends ReadableStream<HlsStreamerObject> {
         super();
 
         let source;
-        const transform = new TransformStream(
+        const transform = new WS.TransformStream(
             source = new HlsSegmentDataSource(options),
-            new CountQueuingStrategy({ highWaterMark: 1 }),
-            new CountQueuingStrategy({ highWaterMark: options.highWaterMark ?? 0 })
+            new WS.CountQueuingStrategy({ highWaterMark: 1 }),
+            new WS.CountQueuingStrategy({ highWaterMark: options.highWaterMark ?? 0 })
         );
 
         this.source = source;
@@ -415,8 +415,8 @@ export class HlsSegmentStreamer extends ReadableStream<HlsStreamerObject> {
 
         // Mirror transform ReadableStream
 
-        for (const key of Reflect.ownKeys(ReadableStream.prototype)) {
-            const descriptor = Object.getOwnPropertyDescriptor(ReadableStream.prototype, key)!;
+        for (const key of Reflect.ownKeys(WS.ReadableStream.prototype)) {
+            const descriptor = Object.getOwnPropertyDescriptor(WS.ReadableStream.prototype, key)!;
             if (key === 'constructor') {
                 continue;
             }
@@ -431,9 +431,4 @@ export class HlsSegmentStreamer extends ReadableStream<HlsStreamerObject> {
             Object.defineProperty(this, key, descriptor);
         }
     }
-
-    /*cancel(reason?: any): Promise<void> {
-
-        if (this.)
-    }*/
 }

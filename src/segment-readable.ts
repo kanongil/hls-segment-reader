@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import { assert } from 'hls-playlist-reader/helpers';
+import { assert, webstreamImpl as WS } from 'hls-playlist-reader/helpers';
 
 import { HlsFetcherObject, HlsSegmentFetcher } from './segment-fetcher.js';
 
@@ -46,7 +46,7 @@ class HlsSegmentSource /*implements UnderlyingSource<HlsFetcherObject>*/ {
  * Reads an HLS media playlist, and output segments in order.
  * Live & Event playlists are refreshed as needed, and expired segments are dropped when backpressure is applied.
  */
-export class HlsSegmentReadable extends ReadableStream<HlsFetcherObject> {
+export class HlsSegmentReadable extends WS.ReadableStream<HlsFetcherObject> {
 
     source: HlsSegmentSource;
 
@@ -54,7 +54,7 @@ export class HlsSegmentReadable extends ReadableStream<HlsFetcherObject> {
 
         const source = new HlsSegmentSource(fetcher);
 
-        super(source, new CountQueuingStrategy({ highWaterMark: 0 }));
+        super(source, new WS.CountQueuingStrategy({ highWaterMark: 0 }));
 
         this.source = source;
     }

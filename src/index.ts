@@ -1,5 +1,5 @@
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { ContentFetcher } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, webstreamImpl as WS } from 'hls-playlist-reader/helpers';
 import { M3U8Playlist, MediaPlaylist } from 'm3u8parse';
 import { HlsFetcherObject, HlsSegmentFetcher, HlsSegmentFetcherOptions } from './segment-fetcher.js';
 import { HlsSegmentReadable } from './segment-readable.js';
@@ -39,7 +39,7 @@ const createSimpleReader = function (uri: URL | string, options: SimpleReaderOpt
 
     if (options.stopDate) {
         const stopDate = new Date(options.stopDate);
-        readable = readable.pipeThrough(new TransformStream({
+        readable = readable.pipeThrough(new WS.TransformStream({
             transform(obj, controller) {
 
                 if ((obj.entry.program_time || 0) > stopDate) {

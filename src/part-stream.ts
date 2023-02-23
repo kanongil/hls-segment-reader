@@ -260,67 +260,6 @@ export class PartStreamImpl<T extends object> {
     }
 }
 
-/*export class PartStream extends ReadableStream {
-
-    #impl: PartStreamImpl<ReadableStream<Uint8Array>>;
-
-    get meta(): Promise<FetchResult['meta']> {
-
-        return this.#impl.meta();
-    }
-
-    constructor(options: PartStreamOptions) {
-
-        super();
-
-        const transform = new TransformStream();
-
-        this.#impl = new PartStreamImpl<ReadableStream<Uint8Array>>((err, stream, final) => {
-
-            if (err) {
-                return transform.writable.abort(err);
-            }
-
-            return stream!.pipeTo(transform.writable, { preventClose: !final });
-        }, options);
-
-        // Mirror transform ReadableStream
-
-        for (const key of Reflect.ownKeys(ReadableStream.prototype)) {
-            const descriptor = Object.getOwnPropertyDescriptor(ReadableStream.prototype, key)!;
-            if (key === 'constructor') {
-                continue;
-            }
-
-            if (descriptor.value) {
-                descriptor.value = typeof descriptor.value === 'function' ? descriptor.value.bind(transform.readable) : descriptor.value;
-            }
-            else {
-                descriptor.get = descriptor.get?.bind(transform.readable);
-            }
-
-            Object.defineProperty(this, key, descriptor);
-        }
-    }
-
-    append(parts: Part[], final = false): void {
-
-        this.#impl.addParts(parts, final);
-    }
-
-    hint(hint?: PreloadHints): void {
-
-        if (!hint) {
-            return;
-        }
-
-        assert(!hint.map, 'MAP hint is not supported');
-        assert(hint.part, 'PART hint is required');
-
-        this.#impl.setHint({ ...hint.part, type: 'PART' });
-    }
-}*/
-
 // eslint-disable-next-line @typescript-eslint/ban-types
 type Constructor = new (...args: any[]) => {};
 
