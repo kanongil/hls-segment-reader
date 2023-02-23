@@ -1,11 +1,12 @@
 /// <reference lib="dom" />
 
+import type * as TAttr from 'm3u8parse/types/attrs';
 import type { HlsFetcherObject } from './index.js';
-import { Byterange, cancelFetch, IDownloadTracker, performFetch } from 'hls-playlist-reader/helpers';
+import type { PartStreamCtor } from './part-stream.js';
 
 import { AttrList } from 'm3u8parse';
-import { assert } from 'hls-playlist-reader/helpers';
-import { PartStream } from './part-stream.js';
+import { assert, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
+import { ContentFetcher as ContentFetcherWeb } from 'hls-playlist-reader/helpers.web';
 
 try {
     // TODO: find better way to hook these
@@ -37,7 +38,7 @@ const internals = {
         'application/mp4'
     ]),
 
-    isSameMap(m1?: AttrList, m2?: AttrList) {
+    isSameMap(m1?: AttrList<TAttr.Map>, m2?: AttrList<TAttr.Map>) {
 
         return m1 === m2 || (m1 && m2 && m1.get('uri') === m2.get('uri') && m1.get('byterange') === m2.get('byterange'));
     },
@@ -49,7 +50,8 @@ const internals = {
 };
 
 
-type FetchResult = Awaited<ReturnType<typeof performFetch>>;
+type StreamTypes = typeof ContentFetcher['StreamProto'] | typeof ContentFetcherWeb['StreamProto'];
+type FetchResult = IFetchResult<StreamTypes>;
 
 
 export class HlsStreamerObject {
@@ -57,9 +59,9 @@ export class HlsStreamerObject {
     type: 'segment' | 'map';
     file: FetchResult['meta'];
     segment: Readonly<HlsFetcherObject>;
-    stream?: FetchResult['stream'];
+    stream?: StreamTypes;
 
-    get attrs(): AttrList | undefined {
+    get attrs(): AttrList<TAttr.Map> | undefined {
 
         return this.segment.entry.map;
     }
@@ -76,6 +78,7 @@ export class HlsStreamerObject {
 export interface HlsSegmentStreamerOptions {
     withData?: boolean; // default true
     highWaterMark?: number;
+    streamType?: typeof ContentFetcher['prototype']['type'] | typeof ContentFetcherWeb['prototype']['type'];
 
     downloadTracker?: IDownloadTracker;
 
@@ -85,15 +88,21 @@ export interface HlsSegmentStreamerOptions {
 
 export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsStreamerObject> {
 
+    static readonly defaultType = new ContentFetcher().type;
+
     readonly withData: boolean;
     readonly transforms = 0;
     readonly downloadTracker?: IDownloadTracker;
 
+    protected readonly contentFetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>;
+    protected PartStream: PartStreamCtor<typeof ContentFetcher['StreamProto'] | typeof ContentFetcherWeb['StreamProto']> | undefined;
+
+    #streamType: Required<HlsSegmentStreamerOptions>['streamType'];
     #readState = new (class ReadState {
         indexTokens = new Set<number | string>();
         activeTokens = new Set<number | string>();
 
-        map?: AttrList;
+        map?: AttrList<TAttr.Map>;
     })();
 
     #started = false;
@@ -103,15 +112,23 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
         this.withData = options.withData ?? true;
         this.downloadTracker = options.downloadTracker;
+        this.contentFetcher = undefined as any as HlsSegmentDataSource['contentFetcher'];     // Fake init
+        this.#streamType = options.streamType ?? HlsSegmentDataSource.defaultType;
 
         if (options.onProblem) {
             this.onProblem = options.onProblem;
         }
     }
 
-    start(_controller: TransformStreamDefaultController) {
+    async start(_controller: TransformStreamDefaultController): Promise<void> {
 
-        // Do nothing
+        const ContentFetcherImpl = this.#streamType === HlsSegmentDataSource.defaultType ?
+            ContentFetcher :
+            (await import(`hls-playlist-reader/helpers.${this.#streamType}.js`)).ContentFetcher;
+
+        (<any> this).contentFetcher = new ContentFetcherImpl();
+
+        this.PartStream = (await import(`./part-stream.${this.#streamType}.js`)).PartStream;
     }
 
     async transform(chunk: HlsFetcherObject, controller: TransformStreamDefaultController) {
@@ -185,7 +202,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 // Fully buffer stream to ensure it goes well
 
                 try {
-                    await fetch.completed;
+                    await fetch.completed;       // Note: Since we don't consume the stream, this could potentially deadlock if internal buffer is filled
                     segment.evicted.throwIfAborted();
                 }
                 catch (err: any) {
@@ -195,7 +212,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 }
             }
             catch (err: any) {
-                cancelFetch(fetch);
+                fetch?.cancel();
                 fetch = undefined;
 
                 segment.evicted.throwIfAborted();
@@ -257,26 +274,28 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             return obj;
         }
         finally {
-            cancelFetch(fetch);
+            fetch?.cancel();
         }
     }
 
     private async _fetchParts(segment: HlsFetcherObject): Promise<HlsStreamerObject> {
 
-        let stream: PartStream | undefined = new PartStream({ baseUrl: segment.baseUrl, signal: segment.evicted, tracker: this.downloadTracker });
+        assert(!(this.contentFetcher instanceof ContentFetcherWeb));     // TODO: support web fetcher
 
-        const getPartData = (part: AttrList) => ({
+        const partStream = new this.PartStream!(this.contentFetcher, { baseUrl: segment.baseUrl, signal: segment.evicted, tracker: this.downloadTracker });
+
+        const getPartData = (part: AttrList<TAttr.Part>) => ({
             uri: part.get('uri', AttrList.Types.String)!,
             byterange: part.has('byterange') ? Object.assign({ offset: 0 }, part.get('byterange', AttrList.Types.Byterange)) : undefined
         });
 
         // At this point object.stream has only been readied / opened
 
+        let stream: typeof partStream | undefined = partStream;
         try {
 
             // Setup update tracker
 
-            const updateStream = stream;
             segment.onUpdate = function (update, old) {
 
                 const usedParts = old ? old.parts?.length : update.parts?.length;
@@ -289,18 +308,19 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 }
 
                 // FIXME
-                updateStream.append(segmentParts.map(getPartData), this.isClosed);
-                updateStream.hint(segment.hints);
+                partStream.append(segmentParts.map(getPartData), this.isClosed);
+                partStream.hint(segment.hints);
             };
 
             // Prepare parts
 
-            assert(segment.entry.parts);
+            if (segment.entry.parts) {
+                partStream.append(segment.entry.parts.map(getPartData));
+            }
 
-            stream.append(segment.entry.parts.map(getPartData));
-            stream.hint(segment.hints!);
+            partStream.hint(segment.hints!);
 
-            const meta = await stream.meta;
+            const meta = await partStream.meta;
             assert(!this.#ended, 'ended');
 
             const obj = new HlsStreamerObject(meta, stream, 'segment', segment);
@@ -310,7 +330,10 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             return obj;
         }
         finally {
-            stream?.cancel();
+            if (stream) {
+                segment.onUpdate = undefined;
+                stream.cancel();
+            }
         }
     }
 
@@ -364,7 +387,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
     private async _fetchFrom(entry: { uri: string; byterange?: Required<Byterange> }, { baseUrl, signal }: { baseUrl: string; signal: AbortSignal }) {
 
         const { uri, byterange } = entry;
-        return await performFetch(new URL(uri, baseUrl), { byterange, retries: 2, signal, tracker: this.downloadTracker });
+        return await this.contentFetcher.perform(new URL(uri, baseUrl), { byterange, retries: 2, signal, tracker: this.downloadTracker });
     }
 }
 

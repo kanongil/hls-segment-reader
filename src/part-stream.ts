@@ -1,8 +1,10 @@
-import { AbortablePromise, assert, Deferred, IDownloadTracker, performFetch } from 'hls-playlist-reader/helpers';
-import type { Byterange } from 'hls-playlist-reader/helpers';
+import { AbortablePromise, arrayAt, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
+import type { ContentFetcher as ContentFetcherWeb } from 'hls-playlist-reader/helpers.web';
+
+import { assert, Deferred } from 'hls-playlist-reader/helpers';
 import { PreloadHints } from 'hls-playlist-reader/playlist';
 
-type FetchResult = Awaited<ReturnType<typeof performFetch>>;
+type FetchResult = IFetchResult<typeof ContentFetcher['StreamProto'] | typeof ContentFetcherWeb['StreamProto']>;
 
 type ExtendedFetch = AbortablePromise<FetchResult & { part: Part }>;
 
@@ -24,26 +26,31 @@ export type Part = {
     hint?: Hint;
 };
 
-interface PartStreamOptions {
+export interface PartStreamOptions {
     baseUrl: string;
     signal: AbortSignal;
     tracker?: IDownloadTracker;
 }
 
-class PartStreamImpl<T extends object> {
+type FeedFn<T> = (err?: Error, stream?: T, final?: boolean) => Promise<void> | void;
+
+export class PartStreamImpl<T extends object> {
+
+    readonly #contentFetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>;
+    readonly #baseUrl: string;
+    readonly #signal: AbortSignal;
+    readonly #tracker?: IDownloadTracker;
+    readonly #feed: FeedFn<T>;
 
     #queuedParts: Part[] = [];
     #fetches: ExtendedFetch[] = [];
     #meta = Object.assign(new Deferred<FetchResult['meta']>(), { queued: false });
-    #fetchTimer?: NodeJS.Timeout;
+    #fetchTimer?: ReturnType<typeof setTimeout>;
     #hint?: Hint;
-    #baseUrl: string;
-    #signal: AbortSignal;
-    #tracker?: IDownloadTracker;
-    #feed: (err?: Error, stream?: T) => Promise<void>;
 
-    constructor(feedFn: (err?: Error, stream?: T) => Promise<void>, { baseUrl, signal, tracker }: PartStreamOptions) {
+    constructor(fetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>, feedFn: FeedFn<T>, { baseUrl, signal, tracker }: PartStreamOptions) {
 
+        this.#contentFetcher = fetcher;
         this.#feed = feedFn;
         this.#baseUrl = baseUrl;
         this.#signal = signal;
@@ -96,7 +103,7 @@ class PartStreamImpl<T extends object> {
 
             if (hint) {
                 const blocking = 'hint+' + this.#baseUrl;
-                const fetch = performFetch(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal, tracker: this.#tracker, blocking });
+                const fetch = this.#contentFetcher.perform(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal, tracker: this.#tracker, blocking });
                 fetch.catch(() => undefined);
                 this.#hint = { part: hint, fetch };
             }
@@ -203,7 +210,7 @@ class PartStreamImpl<T extends object> {
                 merged.push({});
             }
 
-            merged[merged.length - 1].final = true;
+            arrayAt(merged, -1)!.final = true;
         }
 
         return merged;
@@ -217,6 +224,9 @@ class PartStreamImpl<T extends object> {
         }
         else {
             if (!part.uri) {
+
+                // TODO: just throw?
+
                 return Object.assign(Promise.resolve({
                     stream: undefined,
                     meta: {
@@ -226,11 +236,15 @@ class PartStreamImpl<T extends object> {
                         modified: null
                     },
                     completed: Promise.resolve(),
-                    part
+                    part,
+
+                    // eslint-disable-next-line @typescript-eslint/no-empty-function
+                    cancel() {},
+                    consumeUtf8: () => Promise.resolve('')
                 }), { abort: () => undefined });
             }
 
-            fetch = performFetch(new URL(part.uri, this.#baseUrl), { byterange: part.byterange, signal: this.#signal, tracker: this.#tracker });
+            fetch = this.#contentFetcher.perform(new URL(part.uri, this.#baseUrl), { byterange: part.byterange, signal: this.#signal, tracker: this.#tracker });
         }
 
         return Object.assign(fetch.then((fetchResult) => ({ ...fetchResult, part })), {
@@ -242,14 +256,11 @@ class PartStreamImpl<T extends object> {
 
         // TODO: only feed part.byterange.length in case it is longer??
 
-        await this.#feed(undefined, stream);
-        if (part.final) {
-            return this.#feed();
-        }
+        await this.#feed(undefined, stream, part.final === true);
     }
 }
 
-export class PartStream extends ReadableStream {
+/*export class PartStream extends ReadableStream {
 
     #impl: PartStreamImpl<ReadableStream<Uint8Array>>;
 
@@ -264,17 +275,13 @@ export class PartStream extends ReadableStream {
 
         const transform = new TransformStream();
 
-        this.#impl = new PartStreamImpl<ReadableStream<Uint8Array>>((err, stream) => {
+        this.#impl = new PartStreamImpl<ReadableStream<Uint8Array>>((err, stream, final) => {
 
             if (err) {
                 return transform.writable.abort(err);
             }
 
-            if (stream) {
-                return stream.pipeTo(transform.writable, { preventClose: true });
-            }
-
-            return transform.writable.close().catch(() => undefined);
+            return stream!.pipeTo(transform.writable, { preventClose: !final });
         }, options);
 
         // Mirror transform ReadableStream
@@ -312,4 +319,64 @@ export class PartStream extends ReadableStream {
 
         this.#impl.setHint({ ...hint.part, type: 'PART' });
     }
+}*/
+
+// eslint-disable-next-line @typescript-eslint/ban-types
+type Constructor = new (...args: any[]) => {};
+
+export interface IPartStream {
+    readonly meta: Promise<FetchResult['meta']>;
+    append(parts: Part[], final?: boolean): void;
+    hint(hint?: PreloadHints): void;
+    cancel(reason?: Error): void;
 }
+
+
+
+export interface PartStreamCtor<TBase> {
+    new(fetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>, options: PartStreamOptions): TBase & IPartStream;
+}
+
+export const partStreamSetup = function <T extends object, TBase extends Constructor>(Base: TBase) {
+
+    return class PartStream extends Base {
+
+        #impl: PartStreamImpl<T> = {} as any as PartStreamImpl<T>;
+
+        get meta(): Promise<FetchResult['meta']> {
+
+            return this.#impl.meta();
+        }
+
+        constructor(...args: any[]) {
+
+            super();
+
+            const fetcher = (<ConstructorParameters<PartStreamCtor<any>>> args)[0];
+            const options = (<ConstructorParameters<PartStreamCtor<any>>> args)[1];
+            this.#impl = new PartStreamImpl<T>(fetcher, this._feedPart.bind(this), options);
+        }
+
+        append(parts: Part[], final = false): void {
+
+            this.#impl.addParts(parts, final);
+        }
+
+        hint(hint?: PreloadHints): void {
+
+            if (!hint) {
+                return;
+            }
+
+            assert(!hint.map, 'MAP hint is not supported');
+            assert(hint.part, 'PART hint is required');
+
+            this.#impl.setHint({ ...hint.part, type: 'PART' });
+        }
+
+        _feedPart(_err?: Error, stream?: T, final?: boolean): Promise<void> | void {
+
+            throw new Error('Must be subclassed');
+        }
+    };
+};

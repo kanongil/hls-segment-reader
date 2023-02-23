@@ -9,14 +9,12 @@ import Joi from 'joi';
 import { AttrList, M3U8Playlist, MediaPlaylist, MediaSegment } from 'm3u8parse';
 import { HlsPlaylistFetcher } from 'hls-playlist-reader/fetcher';
 import { HlsFetcherObject, HlsSegmentFetcher } from '../lib/segment-fetcher.js';
-import { Deferred } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
 
 
 export interface UnprotectedPlaylistFetcher {
     _intervals: (number | undefined)[];
-    getUpdateInterval(...args: any[]): ReturnType<HlsPlaylistFetcher['getUpdateInterval']>;
-    performFetch(...args: any[]): unknown;
-    readFetchContent(...args: any[]): unknown;
+    getUpdateInterval(...args: any[]): ReturnType<HlsPlaylistFetcher<any>['getUpdateInterval']>;
 }
 
 export const provisionServer = async () => {
@@ -309,6 +307,8 @@ export const expectCause = (err: any, match: string | RegExp): void => {
 
 export class FakeFetcher extends HlsSegmentFetcher {
 
+    static readonly contentFetcher = new ContentFetcher();
+
     readonly queue: HlsFetcherObject[] = [];
     ended = false;
 
@@ -316,7 +316,7 @@ export class FakeFetcher extends HlsSegmentFetcher {
 
     constructor() {
 
-        super(new HlsPlaylistFetcher('data:'));
+        super(new HlsPlaylistFetcher('data:', FakeFetcher.contentFetcher));
     }
 
     feed(obj: HlsFetcherObject) {

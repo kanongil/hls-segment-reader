@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { Readable } from 'stream';
 
 import { expect } from '@hapi/code';
 import { wait } from '@hapi/hoek';
@@ -10,7 +11,7 @@ import { provisionServer, provisionLiveServer, genIndex, ServerState, Unprotecte
 import { createSimpleReader, HlsFetcherObject, HlsSegmentReadable, HlsSegmentStreamer, HlsStreamerObject } from '../lib/index.js';
 import { HlsSegmentStreamerOptions } from '../lib/segment-streamer.js';
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { Deferred } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
 import { HlsSegmentFetcher, HlsSegmentFetcherOptions } from '../lib/segment-fetcher.js';
 
 
@@ -35,32 +36,42 @@ const nextValue = async function<T> (iter: AsyncIterator<T>, expectDone = false)
     return value as T;
 };
 
-const devNull = async (stream?: ReadableStream) => {
+const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
 
-    if (!stream) {
-        return Promise.reject('No stream');
+    if (stream instanceof ReadableStream) {
+        return new Promise<number>((resolve, reject) => {
+
+            let consumed = 0;
+            stream.pipeTo(new WritableStream<Uint8Array>({
+                abort: reject,
+                write(c) {
+
+                    consumed += c.byteLength;
+                },
+                close: () => resolve(consumed)
+            }));
+        });
+    }
+    else if (stream instanceof Readable) {
+        let consumed = 0;
+        for await (const chunk of stream) {
+            consumed += chunk.byteLength;
+        }
+
+        return consumed;
     }
 
-    return new Promise<number>((resolve, reject) => {
-
-        let consumed = 0;
-        stream.pipeTo(new WritableStream<Uint8Array>({
-            abort: reject,
-            write(c) {
-
-                consumed += c.byteLength;
-            },
-            close: () => resolve(consumed)
-        }));
-    });
+    throw new Error('Missing or invalid stream');
 };
 
 
 describe('HlsSegmentStreamer()', () => {
 
+    const contentFetcher = new ContentFetcher();
+
     const readSegments = function (url: string, options?: HlsSegmentStreamerOptions & HlsPlaylistFetcherOptions): Promise<HlsStreamerObject[]> {
 
-        const r = new HlsSegmentStreamer(new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(url, options), options)), options);
+        const r = new HlsSegmentStreamer(new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(url, contentFetcher, options), options)), options);
         const reader = r.getReader();
         const segments: HlsStreamerObject[] = [];
 
@@ -337,12 +348,19 @@ describe('HlsSegmentStreamer()', () => {
             for await (const obj of r) {
                 const hasher = createHash('sha1');
 
-                await obj.stream?.pipeTo(new WritableStream({
-                    write(chunk) {
+                if (obj.stream instanceof ReadableStream) {
+                    await obj.stream.pipeTo(new WritableStream({
+                        write(chunk) {
 
+                            hasher.update(chunk);
+                        }
+                    }));
+                }
+                else if (obj.stream instanceof Readable) {
+                    for await (const chunk of obj.stream) {
                         hasher.update(chunk);
                     }
-                }));
+                }
 
                 checksums.push(hasher.digest().toString('hex'));
             }
@@ -352,7 +370,7 @@ describe('HlsSegmentStreamer()', () => {
 
         it('does not internally buffer (highWaterMark=0)', async () => {
 
-            const streamer = new HlsSegmentStreamer(new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/long.m3u8`))), { withData: false, highWaterMark: 0 });
+            const streamer = new HlsSegmentStreamer(new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/long.m3u8`, contentFetcher))), { withData: false, highWaterMark: 0 });
 
             let reads = 0;
             for await (const obj of streamer) {
@@ -432,7 +450,7 @@ describe('HlsSegmentStreamer()', () => {
 
         it('can be cancelled', async () => {
 
-            const readable = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/500.m3u8`)));
+            const readable = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/500.m3u8`, contentFetcher)));
             const r = new HlsSegmentStreamer(readable);
 
             let cancelled = false;
@@ -468,7 +486,7 @@ describe('HlsSegmentStreamer()', () => {
             };
         } {
 
-            const fetcher = new HlsPlaylistFetcher(`${liveServer.info.uri}/live/live.m3u8`, readerOptions);
+            const fetcher = new HlsPlaylistFetcher(`${liveServer.info.uri}/live/live.m3u8`, contentFetcher, readerOptions);
             const streamer = new HlsSegmentStreamer(new HlsSegmentReadable(new HlsSegmentFetcher(fetcher, { fullStream: false, ...readerOptions })), { withData: true, ...readerOptions });
 
             const _fetcher = fetcher as any as UnprotectedPlaylistFetcher;

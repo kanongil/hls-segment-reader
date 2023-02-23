@@ -3,9 +3,10 @@
   "version": "8.0.1",
   "description": "Read segments from HLS streams using a Readable",
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "type": "module",
   "scripts": {
-    "clean": "tsc -b src test --clean; rm -Rf ./coverage",
+    "clean": "tsc -b src test src/tsconfig.webonly.json --clean; rm -Rf ./coverage",
     "compile": "tsc -b src",
     "mocha": "mocha -R dot --check-leaks 'test/*.test.js'",
     "lint": "eslint .",
@@ -13,7 +14,7 @@
     "pretest": "concurrently 'npm run lint' 'tsc -b test'",
     "test": "c8 --check-coverage -- npm run mocha",
     "test-cov-html": "tsc -b test && c8 -r html mocha -R dot 'test/*.test.js'",
-    "test-with-polyfills": "npm run pretest && c8 --check-coverage -- npm run mocha -- -r ./test/hook-polyfills.js"
+    "test-webtypes": "tsc --project src/tsconfig.webonly.json --noEmit"
   },
   "keywords": [
     "streaming",
@@ -25,24 +26,23 @@
   "author": "Gil Pedersen <gpdev@gpost.dk>",
   "license": "BSD-2-Clause",
   "engines": {
-    "node": ">=14.17.0"
+    "node": ">=16.17.0"
   },
   "dependencies": {
     "@hapi/hoek": "^10.0.0",
-    "hls-playlist-reader": "file:../node-hls-playlist-reader",
-    "m3u8parse": "^4.0.0-rc4"
+    "hls-playlist-reader": "^3.0.0",
+    "m3u8parse": "^4.0.0"
   },
   "devDependencies": {
     "@hapi/boom": "^10.0.0",
     "@hapi/code": "^9.0.1",
     "@hapi/eslint-plugin": "^6.0.0",
-    "@hapi/hapi": "^20.0.0",
-    "@hapi/inert": "^6.0.1",
+    "@hapi/hapi": "^21.2.1",
+    "@hapi/inert": "^7.0.0",
     "@hapi/lab": "^25.0.1",
-    "@types/hapi__hapi": "^20.0.12",
     "@types/hapi__inert": "^5.2.3",
     "@types/mime-types": "^2.1.0",
-    "@types/mocha": "^9.1.1",
+    "@types/mocha": "^10.0.1",
     "@typescript-eslint/eslint-plugin": "^5.29.0",
     "@typescript-eslint/parser": "^5.29.0",
     "c8": "^7.12.0",
@@ -51,8 +51,7 @@
     "joi": "^17.2.0",
     "mocha": "^10.0.0",
     "typescript": "^4.8.2",
-    "uristream": "^6.3.0",
-    "web-streams-polyfill": "^3.2.1"
+    "uristream": "^6.3.0"
   },
   "repository": {
     "type": "git",

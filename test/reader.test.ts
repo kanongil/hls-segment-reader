@@ -6,7 +6,7 @@
 import { notFound, serverUnavailable, unauthorized } from '@hapi/boom';
 import { expect } from '@hapi/code';
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { Deferred } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
 import { wait } from '@hapi/hoek';
 import { AttrList, MainPlaylist, MediaPlaylist } from 'm3u8parse';
 
@@ -25,9 +25,11 @@ declare global {
 
 describe('HlsSegmentReadable()', () => {
 
+    const contentFetcher = new ContentFetcher();
+
     const createReadable = (url: URL | string, options?: HlsSegmentFetcherOptions & HlsPlaylistFetcherOptions) => {
 
-        const fetcher = new HlsSegmentFetcher(new HlsPlaylistFetcher(url, options), options);
+        const fetcher = new HlsSegmentFetcher(new HlsPlaylistFetcher(url, contentFetcher, options), options);
         return new HlsSegmentReadable(fetcher);
     };
 
@@ -72,7 +74,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('creates a valid object', async () => {
 
-            const r = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/500.m3u8`)));
+            const r = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher(`${server.info.uri}/simple/500.m3u8`, contentFetcher)));
 
             expect(r).to.be.instanceOf(HlsSegmentReadable);
 
@@ -92,7 +94,7 @@ describe('HlsSegmentReadable()', () => {
 
         it('rejects on read() with invalid fetcher uri', async () => {
 
-            const r = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher('asdf://test')));
+            const r = new HlsSegmentReadable(new HlsSegmentFetcher(new HlsPlaylistFetcher('asdf://test', contentFetcher)));
             const reader = r.getReader();
 
             await expect(reader.read()).to.reject();

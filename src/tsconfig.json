@@ -3,7 +3,7 @@
     "composite": true,
     "allowSyntheticDefaultImports": true,
     "target": "ES2022",
-    "lib": [ "ES2020" ],
+    "lib": [ "ES2021", "ES2022.Error" ],
     "module": "ES2022",
     "moduleResolution": "node16",
     "isolatedModules": true,
@@ -11,6 +11,7 @@
     "strict": true,
     "strictNullChecks": true,
     "esModuleInterop": false,
+    "types": [],
     "outDir": "../lib"
   }
 }

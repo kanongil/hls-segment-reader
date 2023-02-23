@@ -3,21 +3,12 @@ import type { ParsedPlaylist, PreloadHints } from 'hls-playlist-reader/playlist'
 import { M3U8Playlist, MediaPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
 import { HlsIndexMeta, HlsPlaylistFetcher, PlaylistObject } from 'hls-playlist-reader/fetcher';
-import { AbortController, assert, Deferred, wait } from 'hls-playlist-reader/helpers';
+import { assert, Deferred, wait } from 'hls-playlist-reader/helpers';
 
+declare const process: unknown;
 let setMaxListeners = (_n: number, _target: object) => undefined;
 if (typeof process === 'object') {
     setMaxListeners = (await import('node' + ':events')).setMaxListeners;
-}
-
-interface AbortSignal<T = any> extends globalThis.AbortSignal {
-    readonly reason: T;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-redeclare
-interface AbortController<T = any> extends globalThis.AbortController {
-    readonly signal: AbortSignal<T>;
-    abort(reason?: T): void;
 }
 
 
@@ -63,7 +54,7 @@ export class HlsFetcherObject {
 
     private _entry: IndependentSegment;
     #closed?: Deferred<true>;
-    #evicted: AbortSignal<EvictionReason | Error>;
+    #evicted: AbortSignal;
 
     /**
      * @param offset Segment offset in ms since startDate / start of the initial playlist
@@ -125,7 +116,7 @@ export class HlsFetcherObject {
      * The trigger reason will be `'expired'` to signal that the segment
      * is no longer part of the playlist, or an Error.
      */
-    get evicted(): AbortSignal<EvictionReason | Error> {
+    get evicted(): AbortSignal {
 
         return this.#evicted;
     }
@@ -189,7 +180,7 @@ export class HlsSegmentFetcher {
     startDate?: Date;
     stallAfterMs: number;
 
-    readonly source: HlsPlaylistFetcher;
+    readonly source: HlsPlaylistFetcher<any>;
 
     #next = new SegmentPointer();
     /** Current partial segment */
@@ -200,11 +191,11 @@ export class HlsSegmentFetcher {
     #ac = new AbortController();
     #pending = false;
     #track = {
-        active: new Map<string, AbortController<EvictionReason | Error>>(),
+        active: new Map<string, AbortController>(),
         gen: 0
     };
 
-    constructor(source: HlsPlaylistFetcher, options: HlsSegmentFetcherOptions = {}) {
+    constructor(source: HlsPlaylistFetcher<any>, options: HlsSegmentFetcherOptions = {}) {
 
         assert(source instanceof HlsPlaylistFetcher, 'Source must be a HlsPlaylistFetcher');
 

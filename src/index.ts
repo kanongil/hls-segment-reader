@@ -1,4 +1,5 @@
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
+import { ContentFetcher } from 'hls-playlist-reader/helpers';
 import { M3U8Playlist, MediaPlaylist } from 'm3u8parse';
 import { HlsFetcherObject, HlsSegmentFetcher, HlsSegmentFetcherOptions } from './segment-fetcher.js';
 import { HlsSegmentReadable } from './segment-readable.js';
@@ -8,7 +9,7 @@ export { HlsFetcherObject } from './segment-fetcher.js';
 export type { HlsIndexMeta } from 'hls-playlist-reader';
 export { HlsStreamerObject } from './segment-streamer.js';
 
-class UnendingPlaylistFetcher extends HlsPlaylistFetcher {
+class UnendingPlaylistFetcher extends HlsPlaylistFetcher<any> {
 
     protected preprocessIndex<T extends M3U8Playlist>(index: T): T | undefined {
 
@@ -31,7 +32,9 @@ const createSimpleReader = function (uri: URL | string, options: SimpleReaderOpt
 
     const playlistFetcherClass = options.stopDate ? UnendingPlaylistFetcher : HlsPlaylistFetcher;
 
-    const fetcher = new HlsSegmentFetcher(new playlistFetcherClass(uri, options), options);
+    // TODO: add option to select fetcher (web/(node))
+
+    const fetcher = new HlsSegmentFetcher(new playlistFetcherClass(uri, new ContentFetcher(), options), options);
     let readable: ReadableStream<HlsFetcherObject> = new HlsSegmentReadable(fetcher);
 
     if (options.stopDate) {
