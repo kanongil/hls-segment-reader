@@ -10,8 +10,8 @@
     "compile": "tsc -b src",
     "mocha": "mocha -R dot --check-leaks 'test/*.test.js'",
     "lint": "eslint .",
-    "prepublishOnly": "npm run compile -- --force",
     "pretest": "concurrently 'npm run lint' 'tsc -b test'",
+    "prepare": "npm run compile -- --force",
     "test": "c8 --check-coverage -- npm run mocha",
     "test-cov-html": "tsc -b test && c8 -r html mocha -R dot 'test/*.test.js'",
     "test-webtypes": "tsc --project src/tsconfig.webonly.json --noEmit"
