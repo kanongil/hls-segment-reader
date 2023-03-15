@@ -284,7 +284,10 @@ export const partStreamSetup = function <T extends object, TBase extends Constru
 
         get meta(): Promise<FetchResult['meta']> {
 
-            return this.#impl.meta();
+            return this.#impl.meta().then((meta) => ({
+                ...meta,
+                size: -1     // Size only represents the first part, not entire segment which is unknown
+            }));
         }
 
         constructor(...args: any[]) {
