@@ -669,12 +669,10 @@ describe('HlsSegmentReadable()', () => {
                             state.error!++;
                             switch (error) {
                                 case 1:
-                                case 2:
-                                case 3:
                                     throw notFound();
-                                case 4:
+                                case 2:
                                     throw serverUnavailable();
-                                case 5:
+                                case 3:
                                     throw unauthorized();
                             }
                         }
