@@ -57,7 +57,7 @@ type FetchResult = IFetchResult<StreamTypes>;
 export class HlsStreamerObject {
 
     type: 'segment' | 'map';
-    file: FetchResult['meta'];
+    file: Omit<FetchResult['meta'], 'etag'>;
     segment: Readonly<HlsFetcherObject>;
     stream?: StreamTypes;
 
