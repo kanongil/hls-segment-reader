@@ -89,10 +89,10 @@ const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
 
 const testMatrix = new Map(Object.entries({
     'default': { PartStream: PartStreamNode, ContentFetcher: ContentFetcherDefault },
-    'web': { PartStream: PartStreamWeb, ContentFetcher: ContentFetcherWeb }
+    'web': { PartStream: PartStreamWeb, ContentFetcher: ContentFetcherWeb, skip: typeof fetch !== 'function' }
 }));
 
-for (const [label, { PartStream, ContentFetcher }] of testMatrix) {
+for (const [label, { PartStream, ContentFetcher, skip }] of testMatrix) {
 
     describe(`PartStream (${label})`, () => {
 
@@ -221,7 +221,11 @@ for (const [label, { PartStream, ContentFetcher }] of testMatrix) {
         let signal: InstrumentedSignal;
         let baseUrl: string;
 
-        before(async () => {
+        before(async function () {
+
+            if (skip) {
+                return this.skip();
+            }
 
             await server.start();
             baseUrl = `${server.info.uri}/stream/index.m3u8`;
