@@ -5,7 +5,7 @@ import type { HlsFetcherObject } from './index.js';
 import type { PartStreamCtor } from './part-stream.js';
 
 import { AttrList } from 'm3u8parse';
-import { assert, webstreamImpl as WS, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
+import { assert, webstreamImpl as WS, Byterange, ContentFetcher, IDownloadTracker, IFetchResult, wait } from 'hls-playlist-reader/helpers';
 import { ContentFetcher as ContentFetcherWeb } from 'hls-playlist-reader/helpers.web';
 
 try {
@@ -85,7 +85,13 @@ export interface HlsSegmentStreamerOptions {
     onProblem?: (err: Error) => void;
 }
 
-
+/**
+ * Creates a content stream object for each incoming segment (1:1), that a consumer can be read.
+ *
+ * Will read parts from the head of a low latency index and expose as a regular stream, appending data from parts as it arrives.
+ *
+ * Error handling?
+ */
 export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsStreamerObject> {
 
     static readonly defaultType = new ContentFetcher().type;
@@ -188,7 +194,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
         do {
             try {
                 tries++;
-                fetch = await this._fetchFrom({ uri, byterange }, { baseUrl: segment.baseUrl, signal: segment.evicted });
+                fetch = await this._fetchFrom({ uri, byterange }, { retries: 0, baseUrl: segment.baseUrl, signal: segment.evicted });
                 assert(fetch.stream);
 
                 try {
@@ -227,7 +233,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
                 // Delay and retry
 
-                await new Promise((resolve) => setTimeout(resolve, 200 * (segment.entry.duration || 4)));
+                await wait(200 * (segment.entry.duration || 4), { signal: segment.evicted });
                 assert(!this.#ended, 'ended');
             }
         } while (!fetch);
@@ -280,8 +286,6 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
     private async _fetchParts(segment: HlsFetcherObject): Promise<HlsStreamerObject> {
 
-        assert(!(this.contentFetcher instanceof ContentFetcherWeb));     // TODO: support web fetcher
-
         const partStream = new this.PartStream!(this.contentFetcher, { baseUrl: segment.baseUrl, signal: segment.evicted, tracker: this.downloadTracker });
 
         const getPartData = (part: AttrList<TAttr.Part>) => ({
@@ -307,24 +311,18 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                     return;      // No new parts
                 }
 
-                // FIXME
-                partStream.append(segmentParts.map(getPartData), this.isClosed);
-                partStream.hint(segment.hints);
+                partStream.append(segmentParts.map(getPartData), segment.hints, this.isClosed);
             };
 
             // Prepare parts
 
-            if (segment.entry.parts) {
-                partStream.append(segment.entry.parts.map(getPartData));
-            }
-
-            partStream.hint(segment.hints!);
+            partStream.append(segment.entry.parts?.map(getPartData), segment.hints);
 
             const meta = await partStream.meta;
             assert(!this.#ended, 'ended');
 
             const obj = new HlsStreamerObject(meta, stream, 'segment', segment);
-            stream = undefined;     // Claimed - don't cancel
+            stream = undefined;     // Claimed - don't abandon
 
             this.#started = true;
             return obj;
@@ -332,7 +330,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
         finally {
             if (stream) {
                 segment.onUpdate = undefined;
-                stream.cancel();
+                stream.abandon();
             }
         }
     }
@@ -384,10 +382,10 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
         controller.enqueue(obj);
     }
 
-    private async _fetchFrom(entry: { uri: string; byterange?: Required<Byterange> }, { baseUrl, signal }: { baseUrl: string; signal: AbortSignal }) {
+    private async _fetchFrom(entry: { uri: string; byterange?: Required<Byterange> }, { baseUrl, signal, retries = 2 }: { baseUrl: string; signal: AbortSignal; retries?: number }) {
 
         const { uri, byterange } = entry;
-        return await this.contentFetcher.perform(new URL(uri, baseUrl), { byterange, retries: 2, signal, tracker: this.downloadTracker });
+        return await this.contentFetcher.perform(new URL(uri, baseUrl), { byterange, retries, signal, tracker: this.downloadTracker });
     }
 }
 

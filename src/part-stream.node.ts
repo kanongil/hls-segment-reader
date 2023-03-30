@@ -1,4 +1,4 @@
-import { AbortError, assert, ContentFetcher } from 'hls-playlist-reader/helpers';
+import { assert, ContentFetcher } from 'hls-playlist-reader/helpers';
 
 import { Readable } from 'stream';
 
@@ -11,6 +11,8 @@ export class PartStream extends partStreamSetup<Readable, Omit<typeof Readable, 
     constructor(fetcher: InstanceType<typeof ContentFetcher>, options: PartStreamOptions) {
 
         super(fetcher, options);
+
+        this.on('error', () => undefined);     // Don't hard fail on unhandled errors
     }
 
     async #feedPart(stream: Readable, final: boolean): Promise<void> {
@@ -42,20 +44,13 @@ export class PartStream extends partStreamSetup<Readable, Omit<typeof Readable, 
     _feedPart(err?: Error, stream?: Readable, final?: boolean): Promise<void> | void {
 
         if (err) {
-            this.destroy(err);
+            this.destroy(err.name !== 'AbortError' ? err : undefined);
             return;
         }
 
         if (stream) {
             return this.#feedPart(stream, !!final);
         }
-    }
-
-    cancel(reason?: Error) {
-
-        this.destroy(reason);
-        this.#active?.destroy(new AbortError('cancelled', { cause: reason }));
-        this.#active = undefined;
     }
 
     _read() {

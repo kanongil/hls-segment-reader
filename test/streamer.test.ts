@@ -295,7 +295,7 @@ describe('HlsSegmentStreamer()', () => {
             fetcher.feed(segment1);
 
             const segment2 = new HlsFetcherObject(1, new IMediaSegment({
-                parts: []
+                parts: undefined
             }), opts);
             segment2.hints = { part: { uri: 'data:video/mp2t,1.0' } };
 

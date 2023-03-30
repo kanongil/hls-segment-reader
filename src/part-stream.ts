@@ -1,21 +1,15 @@
-import { AbortablePromise, arrayAt, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
+import type { AbortablePromise, Byterange, ContentFetcher, IDownloadTracker, IFetchResult } from 'hls-playlist-reader/helpers';
 import type { ContentFetcher as ContentFetcherWeb } from 'hls-playlist-reader/helpers.web';
 
-import { assert, Deferred } from 'hls-playlist-reader/helpers';
-import { PreloadHints } from 'hls-playlist-reader/playlist';
+import { AbortError, arrayAt, assert, Deferred } from 'hls-playlist-reader/helpers';
+import { PartData, PreloadHints } from 'hls-playlist-reader/playlist';
 
 type FetchResult = IFetchResult<typeof ContentFetcher['StreamProto'] | typeof ContentFetcherWeb['StreamProto']>;
 
-type ExtendedFetch = AbortablePromise<FetchResult & { part: Part }>;
-
-export interface PartHint {
-    uri: string;
-    type: 'PART' | 'MAP';
-    byterange?: Byterange;
-}
+type ExtendedFetch = AbortablePromise<FetchResult> & { part: Part };
 
 type Hint = {
-    part: PartHint;
+    part: PartData;
     fetch: AbortablePromise<FetchResult>;
 };
 
@@ -34,96 +28,97 @@ export interface PartStreamOptions {
 
 type FeedFn<T> = (err?: Error, stream?: T, final?: boolean) => Promise<void> | void;
 
+/**
+ * Shared handler to pass part content (and meta) to a stream implementation.
+ *
+ * Immediately requests all added parts and processes the results in a serial queue.
+ *
+ * Handles passed hint information to pre-load the future part.
+ */
 export class PartStreamImpl<T extends object> {
 
     readonly #contentFetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>;
     readonly #baseUrl: string;
-    readonly #signal: AbortSignal;
     readonly #tracker?: IDownloadTracker;
     readonly #feed: FeedFn<T>;
+    readonly #signal: {
+        signal: AbortSignal;
+        handler: () => void;
+    };
 
+    /** Used to internally cancel all active fetches. */
+    #ac = new AbortController();
     #queuedParts: Part[] = [];
     #fetches: ExtendedFetch[] = [];
-    #meta = Object.assign(new Deferred<FetchResult['meta']>(), { queued: false });
+    #meta = Object.assign(new Deferred<FetchResult['meta']>(), { ready: false });
     #fetchTimer?: ReturnType<typeof setTimeout>;
     #hint?: Hint;
+    //#blocking = Symbol('PartStream');   // We cannot use blocking since the HTTP stack does not handle pipelined requests
 
     constructor(fetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>, feedFn: FeedFn<T>, { baseUrl, signal, tracker }: PartStreamOptions) {
 
         this.#contentFetcher = fetcher;
         this.#feed = feedFn;
         this.#baseUrl = baseUrl;
-        this.#signal = signal;
         this.#tracker = tracker;
+
+        const handler = () => this.cancel(signal.reason);
+        signal.addEventListener('abort', handler, { once: true });
+
+        this.#signal = { signal, handler };
     }
 
-    addParts(parts: Part[], final = false) {
+    /** Called once processing is completed to cleanup state */
+    #finalize(err?: Error) {
 
-        if (!Array.isArray(parts)) {
-            throw new TypeError('Parts must be an array');
+        if (err) {
+            this.#feed(err);
+            this.#meta.reject(err);
+            this.#ac.abort(err);
         }
 
-        this.#queuedParts.push(...parts);
+        clearTimeout(this.#fetchTimer);
+        this.#signal.signal.removeEventListener('abort', this.#signal.handler);
+        this.#fetches = [];
+        this.#hint = undefined;
+    }
 
-        const start = (hint?: Hint): void => {
+    addParts(parts?: Part[], hint?: PreloadHints, final = false) {
 
-            const fetches = this._mergeParts(this.#queuedParts, { final, hint }).map((part) => {
+        assert(!parts || Array.isArray(parts), 'Parts must be an array');
 
-                const fetch = this._fetchPart(part);
+        if (parts) {
+            this.#queuedParts.push(...parts);
+        }
 
-                if (!this.#meta.queued) {
-                    this.#meta.queued = false;
-                    fetch.then(({ meta }) => this.#meta.resolve(meta), this.#meta.reject);
-                }
+        const process = (): void => {
 
-                return fetch;
-            });
+            const merged = this._mergeParts(this.#queuedParts, { final });
 
-            this._feedFetches(fetches).catch(this.#feed.bind(this));
+            // Initiate fetches
+
+            const fetches = merged
+                .map((part) => this._fetchPart(part));
+            this._fetchHints(final ? undefined : hint);
+
+            // Start internal background feed loop (if not already running)
+
+            this._feedFetches(fetches)
+                .catch((err) => this.#finalize(err));     // #finalize() on fetch errors
 
             this.#queuedParts = [];
         };
 
         clearTimeout(this.#fetchTimer);
-        this.#fetchTimer = setTimeout(start, 0, this.#hint);
-        this.#hint = undefined;
-    }
-
-    setHint(hint?: PartHint): void {
-
-        if (hint && hint.type !== 'PART') {
-            return;         // TODO: support MAP hints
-        }
-
-        if (!this._isHinted(hint, this.#hint)) {
-            if (this.#hint) {
-                this.#hint.fetch.abort();
-                this.#hint = undefined;
-            }
-
-            if (hint) {
-                const blocking = 'hint+' + this.#baseUrl;
-                const fetch = this.#contentFetcher.perform(new URL(hint.uri, this.#baseUrl), { byterange: hint.byterange, signal: this.#signal, tracker: this.#tracker, blocking });
-                fetch.catch(() => undefined);
-                this.#hint = { part: hint, fetch };
-            }
-        }
+        this.#fetchTimer = setTimeout(process, 0);
     }
 
     cancel(reason?: Error) {
 
-        const fetches = this.#fetches;
-        this.#fetches = [];
-        for (const fetch of fetches) {
-            //fetch.catch(() => undefined);
-            fetch.abort();
-        }
-
-        this.setHint();
-        this.#meta.reject(reason || new Error('destroyed'));
+        this.#finalize(new AbortError('Cancelled', { cause: reason }));
     }
 
-    private _isHinted(part?: Part | PartHint, hint?: Hint) {
+    private _isHinted(part?: Part, hint?: Hint) {
 
         if (!part || !hint) {
             return false;
@@ -158,10 +153,45 @@ export class PartStreamImpl<T extends object> {
         const active = this.#fetches.length > 0;
         this.#fetches.push(...fetches);
 
+        for (const fetch of fetches) {
+            fetch.catch(() => undefined);      // No unhandled promise rejection errors
+        }
+
         if (!active) {
             for (const fetch of this.#fetches) {
-                const { stream, part } = await fetch;
-                await this._feedPart(stream as T, part);
+                let res: Awaited<ExtendedFetch>;
+                try {
+                    res = await fetch;
+                }
+                catch (err) {
+                    // TODO: report problem!?!?
+
+                    // Cancel all pending fetches to ensure priority for retry request
+
+                    this.#ac.abort(err);
+                    this.#ac = new AbortController();
+
+                    // Immediately retry once
+
+                    res = await this._fetchPart(fetch.part);
+                }
+
+                const { stream, meta } = res;
+
+                if (!this.#meta.ready) {
+                    this.#meta.ready = true;
+                    this.#meta.resolve(meta);
+                }
+
+                // Feed part content to feedFn()
+
+                await this.#feed(undefined, stream as T, fetch.part.final === true);
+
+                // The entire part content has now been transferred and consumed.
+
+                if (fetch.part.final) {
+                    this.#finalize();
+                }
             }
 
             this.#fetches = [];
@@ -173,12 +203,16 @@ export class PartStreamImpl<T extends object> {
         return this.#meta.promise;
     }
 
-    _mergeParts(parts: Part[], { final, hint }: { final: boolean; hint?: Hint }): Part[] {
+    _mergeParts(parts: Part[], { final }: { final: boolean }): Part[] {
 
+        // Attempt to claim active hint
+
+        const hint = this.#hint;
         if (hint) {
             for (const part of parts) {
                 if (this._isHinted(part, hint)) {
                     part.hint = hint;
+                    this.#hint = undefined;
                     break;
                 }
             }
@@ -221,6 +255,7 @@ export class PartStreamImpl<T extends object> {
         let fetch: AbortablePromise<FetchResult>;
         if (part.hint) {
             fetch = part.hint.fetch;
+            part.hint = undefined;
         }
         else {
             if (!part.uri) {
@@ -236,41 +271,49 @@ export class PartStreamImpl<T extends object> {
                         modified: null
                     },
                     completed: Promise.resolve(),
-                    part,
 
                     // eslint-disable-next-line @typescript-eslint/no-empty-function
                     cancel() {},
                     consumeUtf8: () => Promise.resolve('')
-                }), { abort: () => undefined });
+                }), { abort: () => undefined, part });
             }
 
-            fetch = this.#contentFetcher.perform(new URL(part.uri, this.#baseUrl), { byterange: part.byterange, signal: this.#signal, tracker: this.#tracker });
+            fetch = this.#contentFetcher.perform(new URL(part.uri, this.#baseUrl), { retries: 0, byterange: part.byterange, signal: this.#ac.signal, tracker: this.#tracker });
         }
 
-        return Object.assign(fetch.then((fetchResult) => ({ ...fetchResult, part })), {
-            abort: () => fetch.abort()
+        return Object.assign(fetch, {
+            part
         });
     }
 
-    async _feedPart(stream: T | undefined, part: Part) {
+    _fetchHints(hint?: PreloadHints): void {
 
-        // TODO: only feed part.byterange.length in case it is longer??
+        // Cancel unclaimed
 
-        await this.#feed(undefined, stream, part.final === true);
+        if (this.#hint) {
+            this.#hint.fetch.abort();
+            this.#hint = undefined;
+        }
+
+        // Fetch
+
+        const part = hint?.part;
+        if (part) {
+            const fetch = this.#contentFetcher.perform(new URL(part.uri, this.#baseUrl), { retries: 0, byterange: part.byterange, signal: this.#ac.signal, tracker: this.#tracker });
+            fetch.catch(() => undefined);
+            this.#hint = { part, fetch };
+        }
     }
 }
 
 // eslint-disable-next-line @typescript-eslint/ban-types
-type Constructor = new (...args: any[]) => {};
+type Constructor = new (...args: any[]) => IPartStream;
 
 export interface IPartStream {
     readonly meta: Promise<FetchResult['meta']>;
-    append(parts: Part[], final?: boolean): void;
-    hint(hint?: PreloadHints): void;
-    cancel(reason?: Error): void;
+    append(parts?: PartData[], hint?: PreloadHints, final?: boolean): void;
+    abandon(): void;
 }
-
-
 
 export interface PartStreamCtor<TBase> {
     new(fetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>, options: PartStreamOptions): TBase & IPartStream;
@@ -299,21 +342,15 @@ export const partStreamSetup = function <T extends object, TBase extends Constru
             this.#impl = new PartStreamImpl<T>(fetcher, this._feedPart.bind(this), options);
         }
 
-        append(parts: Part[], final = false): void {
+        append(parts?: PartData[], hint?: PreloadHints, final = false): void {
 
-            this.#impl.addParts(parts, final);
+            assert(!hint || hint.part, 'Hint must contain a PART hint');
+            this.#impl.addParts(parts, hint, final);
         }
 
-        hint(hint?: PreloadHints): void {
+        abandon() {
 
-            if (!hint) {
-                return;
-            }
-
-            assert(!hint.map, 'MAP hint is not supported');
-            assert(hint.part, 'PART hint is required');
-
-            this.#impl.setHint({ ...hint.part, type: 'PART' });
+            this.#impl.cancel(new AbortError('Abandoned'));
         }
 
         _feedPart(_err?: Error, stream?: T, final?: boolean): Promise<void> | void {
