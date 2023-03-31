@@ -1,6 +1,6 @@
 import { assert, ContentFetcher } from 'hls-playlist-reader/helpers';
 
-import { Readable } from 'stream';
+import { Readable } from 'node:stream';
 
 import { IPartStream, PartStreamCtor, PartStreamOptions, partStreamSetup } from './part-stream.js';
 
@@ -44,7 +44,7 @@ export class PartStream extends partStreamSetup<Readable, Omit<typeof Readable, 
     _feedPart(err?: Error, stream?: Readable, final?: boolean): Promise<void> | void {
 
         if (err) {
-            this.destroy(err.name !== 'AbortError' ? err : undefined);
+            this.destroy(err);
             return;
         }
 

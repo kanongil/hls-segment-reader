@@ -487,6 +487,48 @@ for (const [label, { PartStream, ContentFetcher, skip }] of testMatrix) {
             ]);
         });
 
+        it('upstream signal is made into an AbortError (pre-meta)', async () => {
+
+            const ac = new AbortController();
+            const stream = new PartStream(fetcher as any, { baseUrl, signal: ac.signal });
+            const promise = devNull(stream);
+
+            stream.append(undefined, { part: { uri: 's0@0.ts?hint' } });
+
+            await wait(1);
+            const err = new Error('fail');
+            ac.abort(err);
+
+            const metaErr = await expect(stream.meta).to.reject(Error);
+            expect(metaErr).to.not.shallow.equal(err);
+            expect(metaErr.name).to.equal('AbortError');
+
+            const streamErr = await expect(promise).to.reject(Error);
+            expect(streamErr).to.not.shallow.equal(err);
+            expect(streamErr.name).to.equal('AbortError');
+        });
+
+        it('upstream signal is made into an AbortError (post-meta)', async () => {
+
+            await server.app.advanceTo(0, 0);
+
+            const ac = new AbortController();
+            const stream = new PartStream(fetcher as any, { baseUrl, signal: ac.signal });
+            const promise = devNull(stream);
+
+            stream.append([{ uri: 's0@0.ts' }], { part: { uri: 's0@1.ts?hint' } });
+
+            const meta = await stream.meta;
+            expect(meta).to.contain({ mime: 'video/mp2t', size: -1 });
+
+            const err = new Error('fail');
+            ac.abort(err);
+
+            const streamErr = await expect(promise).to.reject(Error);
+            expect(streamErr).to.not.shallow.equal(err);
+            expect(streamErr.name).to.equal('AbortError');
+        });
+
         describe('abandon()', () => {
 
             it('works', async () => {
