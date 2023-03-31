@@ -1,8 +1,11 @@
 import { assert, ContentFetcher } from 'hls-playlist-reader/helpers';
 
+import { errorMonitor } from 'node:events';
 import { Readable } from 'node:stream';
 
 import { IPartStream, PartStreamCtor, PartStreamOptions, partStreamSetup } from './part-stream.js';
+
+const ignore = () => undefined;
 
 export class PartStream extends partStreamSetup<Readable, Omit<typeof Readable, 'new'> & PartStreamCtor<Readable>>(Readable as any) implements IPartStream {
 
@@ -12,7 +15,22 @@ export class PartStream extends partStreamSetup<Readable, Omit<typeof Readable, 
 
         super(fetcher, options);
 
-        this.on('error', () => undefined);     // Don't hard fail on unhandled errors
+        // Don't hard fail before meta has been resolved
+
+        this.on('error', ignore);
+        this.meta.then(() => {
+
+            this.off('error', ignore);
+
+            // Don't hard fail on any unhandled AbortError errors
+
+            this.on(errorMonitor, function (this: PartStream, err) {
+
+                if (err.name === 'AbortError' && this.listenerCount('error') === 0) {
+                    this.once('error', () => undefined);
+                }
+            });
+        });
     }
 
     async #feedPart(stream: Readable, final: boolean): Promise<void> {
