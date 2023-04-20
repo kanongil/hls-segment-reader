@@ -39,6 +39,12 @@ export class PartStream extends partStreamSetup<ReadableStream, Omit<ReadableStr
             return this.#transform.writable.abort(err);
         }
 
-        return stream!.pipeTo(this.#transform.writable, { preventClose: !final });
+        if (stream) {
+            return stream!.pipeTo(this.#transform.writable, { preventClose: !final });
+        }
+
+        if (final) {
+            return this.#transform.writable.close();
+        }
     }
 }

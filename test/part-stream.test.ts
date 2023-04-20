@@ -378,6 +378,30 @@ for (const [label, { PartStream, ContentFetcher, skip }] of testMatrix) {
             ]);
         });
 
+        it('handles unexpected close', async () => {
+
+            await server.app.advanceTo(0, 0);
+
+            const stream = new PartStream(fetcher as any, { baseUrl, signal });
+            const promise = devNull(stream);
+
+            stream.append([{ uri: 's0@0.ts' }], { part: { uri: 's0@1.ts?hint' } });
+
+            const meta = await stream.meta;
+            expect(meta).to.contain({ mime: 'video/mp2t', size: -1 });
+
+            await server.app.advanceTo(1, 0);
+            stream.append([], { part: { uri: 's1@0.ts?hint' } }, true);
+
+            const consumed = await promise;
+            expect(consumed).to.equal(10000);
+
+            expect(server.app.requests).to.equal([
+                's0@0',
+                's0@1?hint'
+            ]);
+        });
+
         it('recovers from a hint fetch error (request)', async () => {
 
             await server.app.advanceTo(0, 0);
