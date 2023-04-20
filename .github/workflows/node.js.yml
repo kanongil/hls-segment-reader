@@ -25,7 +25,6 @@ jobs:
       uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
-        check-latest: ${{ matrix.node-version == 'latest' }}
     - run: npm ci
     - name: Run test suite
       run: npm test
