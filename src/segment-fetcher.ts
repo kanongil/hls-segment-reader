@@ -42,23 +42,33 @@ class SegmentPointer {
 
 class HintedSegment extends MediaSegment {}
 
+/**
+ * Object representing data about a single segment in a stream.
+ */
 export class HlsFetcherObject {
 
+    /** Media sequence number from manifest. */
     readonly msn: number;
+
+    /** `true` when no more updates will be delivered. */
     readonly isClosed: boolean;
+
+    /** Segment offset in ms since fetcher `startDate` / start of the initial playlist. */
     readonly offset?: number;
+
+    /** Base URL from parent playlist, to resolve relative URLs against. */
     readonly baseUrl: string;
+
+    /** Preload hints from manifest, if this is the latest segment. */
     hints?: PreloadHints;
 
+    /** Method called when more parts are added, or it closes. */
     onUpdate?: ((entry: IndependentSegment, old?: IndependentSegment) => void) = undefined;
 
     private _entry: IndependentSegment;
     #closed?: Deferred<true>;
     #evicted: AbortSignal;
 
-    /**
-     * @param offset Segment offset in ms since startDate / start of the initial playlist
-     */
     constructor(msn: number, segment: IndependentSegment, { offset, baseUrl, signal }: { baseUrl: string; offset?: number; signal: AbortSignal }) {
 
         this.msn = msn;
@@ -70,6 +80,7 @@ export class HlsFetcherObject {
         this.#evicted = signal;
     }
 
+    /** Parsed independent segment entry from playlist. */
     get entry(): IndependentSegment {
 
         return this._entry;
@@ -103,6 +114,7 @@ export class HlsFetcherObject {
         return this.#closed.promise;
     }
 
+    /** Call to force close segment. Segments self-close when the entry is updated with a non-partial entry. */
     close(): void {
 
         if (!this.isClosed) {
