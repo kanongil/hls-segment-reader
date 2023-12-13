@@ -9,7 +9,7 @@ import { expect } from '@hapi/code';
 import Hapi from '@hapi/hapi';
 import Joi from 'joi';
 
-import { assert, ContentFetcher as ContentFetcherDefault, Deferred, wait, webstreamImpl as WS } from 'hls-playlist-reader/helpers';
+import { assert, ContentFetcher as ContentFetcherDefault, Deferred, wait } from 'hls-playlist-reader/helpers';
 import { ContentFetcher as ContentFetcherWeb } from 'hls-playlist-reader/helpers.web';
 
 import { PartStream as PartStreamNode } from '../lib/part-stream.node.js';
@@ -60,11 +60,11 @@ class InstrumentedSignal extends EventTarget implements AbortSignal {
 
 const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
 
-    if (stream instanceof WS.ReadableStream) {
+    if (stream instanceof ReadableStream) {
         return new Promise<number>((resolve, reject) => {
 
             let consumed = 0;
-            stream.pipeTo(new WS.WritableStream<Uint8Array>({
+            stream.pipeTo(new WritableStream<Uint8Array>({
                 abort: reject,
                 write(c) {
 

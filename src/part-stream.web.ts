@@ -1,10 +1,8 @@
 import type { ContentFetcher } from 'hls-playlist-reader/helpers.web';
 
-import { webstreamImpl as WS } from 'hls-playlist-reader/helpers';
-
 import { PartStreamCtor, PartStreamOptions, partStreamSetup } from './part-stream.js';
 
-export class PartStream extends partStreamSetup<ReadableStream, Omit<ReadableStream<Uint8Array>, 'new'> & PartStreamCtor<ReadableStream>>(WS.ReadableStream as any) {
+export class PartStream extends partStreamSetup<ReadableStream, Omit<ReadableStream<Uint8Array>, 'new'> & PartStreamCtor<ReadableStream>>(ReadableStream as any) {
 
     #transform: TransformStream;
 
@@ -12,12 +10,12 @@ export class PartStream extends partStreamSetup<ReadableStream, Omit<ReadableStr
 
         super(fetcher, options);
 
-        this.#transform = new WS.TransformStream();
+        this.#transform = new TransformStream();
 
         // Mirror transform ReadableStream
 
-        for (const key of Reflect.ownKeys(WS.ReadableStream.prototype)) {
-            const descriptor = Object.getOwnPropertyDescriptor(WS.ReadableStream.prototype, key)!;
+        for (const key of Reflect.ownKeys(ReadableStream.prototype)) {
+            const descriptor = Object.getOwnPropertyDescriptor(ReadableStream.prototype, key)!;
             if (key === 'constructor') {
                 continue;
             }
