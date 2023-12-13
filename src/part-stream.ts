@@ -50,7 +50,7 @@ export class PartStreamImpl<T extends object> {
     #ac = new AbortController();
     #queuedParts: Part[] = [];
     #fetches: ExtendedFetch[] = [];
-    #meta = Object.assign(new Deferred<FetchResult['meta']>(), { ready: false });
+    #meta = Object.assign(new Deferred<FetchResult['meta']>(true), { ready: false });
     #fetchTimer?: ReturnType<typeof setTimeout>;
     #hint?: Hint;
     //#blocking = Symbol('PartStream');   // We cannot use blocking since the HTTP stack does not handle pipelined requests

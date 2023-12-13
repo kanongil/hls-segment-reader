@@ -108,7 +108,7 @@ export class HlsFetcherObject {
         }
 
         if (!this.#closed) {
-            this.#closed = new Deferred<true>();
+            this.#closed = new Deferred<true>(false);    // Never rejected
         }
 
         return this.#closed.promise;
@@ -199,7 +199,7 @@ export class HlsSegmentFetcher {
     #current: HlsFetcherObject | null = null;
     #playlist?: ParsedPlaylist;
     #nextPlaylist = new Deferred<ParsedPlaylist>(true);
-    #fetchUpdate = new Deferred<void>();
+    #fetchUpdate = new Deferred<void>(false);
     #ac = new AbortController();
     #pending = false;
     #track = {
@@ -316,7 +316,7 @@ export class HlsSegmentFetcher {
     private _requestPlaylistUpdate(): Promise<ParsedPlaylist> {
 
         const deferred = this.#fetchUpdate;
-        this.#fetchUpdate = new Deferred<void>();
+        this.#fetchUpdate = new Deferred<void>(false);
         deferred.resolve();
 
         return this.#nextPlaylist.promise;
