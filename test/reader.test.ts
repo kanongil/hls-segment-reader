@@ -6,8 +6,7 @@
 import { notFound, serverUnavailable, unauthorized } from '@hapi/boom';
 import { expect } from '@hapi/code';
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
-import { wait } from '@hapi/hoek';
+import { ContentFetcher, Deferred, wait } from 'hls-playlist-reader/helpers';
 import { AttrList, MainPlaylist, MediaPlaylist } from 'm3u8parse';
 
 import { expectCause, provisionServer, provisionLiveServer, genIndex, ServerState, UnprotectedPlaylistFetcher, LlIndexState, genLlIndex } from './_shared.js';

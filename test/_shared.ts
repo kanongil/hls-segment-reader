@@ -3,14 +3,14 @@ import { Readable } from 'stream';
 
 import { expect } from '@hapi/code';
 import Hapi from '@hapi/hapi';
-import { ignore, wait } from '@hapi/hoek';
 import Inert from '@hapi/inert';
 import Joi from 'joi';
 import { AttrList, M3U8Playlist, MediaPlaylist, MediaSegment } from 'm3u8parse';
 import { HlsPlaylistFetcher } from 'hls-playlist-reader/fetcher';
 import { HlsFetcherObject, HlsSegmentFetcher } from '../lib/segment-fetcher.js';
-import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, Deferred, wait } from 'hls-playlist-reader/helpers';
 
+const ignore = () => undefined;
 
 export interface UnprotectedPlaylistFetcher {
     _intervals: (number | undefined)[];

@@ -2,7 +2,6 @@ import { createHash } from 'crypto';
 import { Readable } from 'stream';
 
 import { expect } from '@hapi/code';
-import { wait } from '@hapi/hoek';
 import { AttrList, MediaSegment, IndependentSegment } from 'm3u8parse';
 
 import { provisionServer, provisionLiveServer, genIndex, ServerState, UnprotectedPlaylistFetcher, expectCause, FakeFetcher } from './_shared.js';
@@ -11,7 +10,7 @@ import { provisionServer, provisionLiveServer, genIndex, ServerState, Unprotecte
 import { createSimpleReader, HlsFetcherObject, HlsSegmentReadable, HlsSegmentStreamer, HlsStreamerObject } from '../lib/index.js';
 import { HlsSegmentStreamerOptions } from '../lib/segment-streamer.js';
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { ContentFetcher, Deferred } from 'hls-playlist-reader/helpers';
+import { ContentFetcher, Deferred, wait } from 'hls-playlist-reader/helpers';
 import { HlsSegmentFetcher, HlsSegmentFetcherOptions } from '../lib/segment-fetcher.js';
 
 

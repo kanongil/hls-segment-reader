@@ -27,10 +27,10 @@ export class PartStream extends partStreamSetup<Readable, Omit<typeof Readable, 
             this.on(errorMonitor, function (this: PartStream, err) {
 
                 if (err.name === 'AbortError' && this.listenerCount('error') === 0) {
-                    this.once('error', () => undefined);
+                    this.once('error', ignore);
                 }
             });
-        });
+        }, ignore);
     }
 
     async #feedPart(stream: Readable | undefined, final: boolean): Promise<void> {
