@@ -45,7 +45,9 @@ const typescript = function (project, files) {
             '@typescript-eslint/no-throw-literal': 'error',
             '@typescript-eslint/prefer-for-of': 'warn',
             '@typescript-eslint/type-annotation-spacing': 'warn',
-            '@typescript-eslint/unified-signatures': 'warn'
+            '@typescript-eslint/unified-signatures': 'warn',
+            '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
+            '@typescript-eslint/no-misused-promises': 'error'
         }
     };
 };

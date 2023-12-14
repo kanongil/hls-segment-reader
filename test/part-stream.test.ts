@@ -71,7 +71,7 @@ const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
                     consumed += c.byteLength;
                 },
                 close: () => resolve(consumed)
-            }));
+            })).catch(reject);
         });
     }
     else if (stream instanceof Readable) {
@@ -102,7 +102,7 @@ for (const [label, { PartStream, ContentFetcher, skip }] of testMatrix) {
                 segment: -1,
                 part: -1
             },
-            waiting: undefined as Deferred<void> | undefined,
+            waiting: undefined as Deferred<undefined> | undefined,
             errored: new Map<string, number>(),
 
             wait(segment: number, part: number): Promise<void> | true {
@@ -118,7 +118,7 @@ for (const [label, { PartStream, ContentFetcher, skip }] of testMatrix) {
                 return (this.waiting ??= new Deferred()).promise;
             },
 
-            async advanceTo(segment: number, part = 0, withError?: Error): Promise<void> {
+            async advanceTo(segment: number, part = 0, withError?: Error): Promise<undefined> {
 
                 assert(segment > this.head.segment || (segment === this.head.segment && part > this.head.part));
 

@@ -108,7 +108,7 @@ export const provisionLiveServer = function (shared: { state: ServerState }) {
 
             slowStream.push(Buffer.alloc(5000));
 
-            shared.state.slow.then(() => {
+            void shared.state.slow.then(() => {
 
                 slowStream.push(Buffer.alloc(2000));
                 slowStream.push(null);

@@ -406,7 +406,7 @@ describe('HlsSegmentReadable()', () => {
             expect(playlist).to.exist();
 
             const r = reader.getReader();
-            r.cancel();
+            await r.cancel();
             await r.closed;
 
             expect(reader.locked).to.be.true();
@@ -598,7 +598,8 @@ describe('HlsSegmentReadable()', () => {
                 });
 
                 const r = reader.getReader();
-                setTimeout(() => r.cancel(), 50);
+                const cancelled = wait(50).then(() => r.cancel());
+                cancelled.catch(() => undefined);
 
                 const segments = [];
                 for (;;) {
@@ -612,6 +613,7 @@ describe('HlsSegmentReadable()', () => {
                 }
 
                 await r.closed;
+                await cancelled;
 
                 expect(segments).to.have.length(4);
             });
@@ -638,7 +640,8 @@ describe('HlsSegmentReadable()', () => {
                 };
 
                 const r = reader.getReader();
-                setTimeout(() => r.cancel(new Error('destroyed')), 50);
+                const cancelled = wait(50).then(() => r.cancel(new Error('destroyed')));
+                cancelled.catch(() => undefined);
 
                 for (; ;) {
                     const { done } = await r.read();
@@ -650,6 +653,7 @@ describe('HlsSegmentReadable()', () => {
                 }
 
                 await r.closed;
+                await cancelled;
 
                 expect(sourceReason?.message).to.equal('destroyed');
             });

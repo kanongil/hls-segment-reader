@@ -72,7 +72,13 @@ export class PartStreamImpl<T extends object> {
     #finalize(err?: Error) {
 
         if (err) {
-            this.#feed(err);
+            (async () => this.#feed(err))().catch((catchedErr) => {
+
+                if (catchedErr !== err) {
+                    throw new Error('feedFn failed', { cause: err });
+                }
+            });
+
             this.#meta.reject(err);
             this.#ac.abort(err);
         }
@@ -185,7 +191,12 @@ export class PartStreamImpl<T extends object> {
 
                 // Feed part content to feedFn()
 
-                await this.#feed(undefined, stream as T, fetch.part.final === true);
+                try {
+                    await this.#feed(undefined, stream as T, fetch.part.final === true);
+                }
+                catch (err) {
+                    throw new Error('feedFn failed', { cause: err });
+                }
 
                 // The entire part content has now been transferred and consumed.
 

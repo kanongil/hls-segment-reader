@@ -48,7 +48,7 @@ const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
                     consumed += c.byteLength;
                 },
                 close: () => resolve(consumed)
-            }));
+            })).catch(reject);
         });
     }
     else if (stream instanceof Readable) {
@@ -403,7 +403,7 @@ describe('HlsSegmentStreamer()', () => {
             const segments: HlsStreamerObject[] = [];
 
             const reader = r.getReader();
-            setTimeout(() => reader.cancel(), 50);
+            setTimeout(() => void reader.cancel(), 50);
 
             for (;;) {
                 const { done, value } = await reader.read();
@@ -464,7 +464,7 @@ describe('HlsSegmentStreamer()', () => {
             await reader.read();
             await reader.cancel();
 
-            await wait();
+            await wait(0);
             expect(cancelled).to.be.true();
         });
 
