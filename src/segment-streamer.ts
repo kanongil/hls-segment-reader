@@ -56,21 +56,30 @@ type FetchResult = IFetchResult<StreamTypes>;
 
 export class HlsStreamerObject {
 
-    type: 'segment' | 'map';
-    file: Omit<FetchResult['meta'], 'etag'>;
-    segment: Readonly<HlsFetcherObject>;
-    stream?: StreamTypes;
+    readonly type: 'segment' | 'map';
+    readonly segment: Readonly<HlsFetcherObject>;
+
+    #fetchResult: IFetchResult<StreamTypes>;
+
+    get stream(): StreamTypes {
+
+        return this.#fetchResult.stream!;
+    }
+
+    get file(): Omit<FetchResult['meta'], 'etag'> {
+
+        return this.#fetchResult.meta;
+    }
 
     get attrs(): AttrList<TAttr.Map> | undefined {
 
         return this.segment.entry.map;
     }
 
-    constructor(fileMeta: FetchResult['meta'], stream: FetchResult['stream'], type: 'segment' | 'map', details: Readonly<HlsFetcherObject>) {
+    constructor(fetchResult: IFetchResult<StreamTypes>, type: 'segment' | 'map', details: Readonly<HlsFetcherObject>) {
 
+        this.#fetchResult = fetchResult;
         this.type = type;
-        this.file = fileMeta;
-        this.stream = stream;
         this.segment = details;
     }
 }
@@ -240,7 +249,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
 
         assert(!this.#ended, 'ended');
 
-        return new HlsStreamerObject(fetch.meta, fetch.stream, 'map', segment);
+        return new HlsStreamerObject(fetch, 'map', segment);
     }
 
     private async _fetchSegment(segment: HlsFetcherObject): Promise<HlsStreamerObject> {
@@ -273,7 +282,7 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
                 }
             }*/
 
-            const obj = new HlsStreamerObject(fetch.meta, fetch.stream, 'segment', segment);
+            const obj = new HlsStreamerObject(fetch, 'segment', segment);
             fetch = undefined;     // Claimed - don't cancel
 
             this.#started = true;
@@ -321,7 +330,22 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             const meta = await partStream.meta;
             assert(!this.#ended, 'ended');
 
-            const obj = new HlsStreamerObject(meta, stream, 'segment', segment);
+            const result: IFetchResult<typeof partStream> = {
+                cancel(_err) {
+
+                    // FIXME: how to handle error?
+                    partStream.abandon();
+                },
+                consumeUtf8() {
+
+                    throw new Error('not implemented');
+                },
+                stream,
+                meta,
+                completed: stream.completed
+            };
+
+            const obj = new HlsStreamerObject(result, 'segment', segment);
             stream = undefined;     // Claimed - don't abandon
 
             this.#started = true;
