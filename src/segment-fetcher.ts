@@ -3,18 +3,12 @@ import type { ParsedPlaylist, PreloadHints } from 'hls-playlist-reader/playlist'
 import { M3U8Playlist, MediaPlaylist, MediaSegment, IndependentSegment, AttrList } from 'm3u8parse';
 
 import { HlsIndexMeta, HlsPlaylistFetcher, PlaylistObject } from 'hls-playlist-reader/fetcher';
-import { assert, Deferred, wait } from 'hls-playlist-reader/helpers';
+import { assert, Deferred, TimeoutError, wait } from 'hls-playlist-reader/helpers';
 
 declare const process: unknown;
 let setMaxListeners = (_n: number, _target: object) => undefined;
 if (typeof process === 'object') {
     setMaxListeners = (await import('node' + ':events')).setMaxListeners;
-}
-
-
-export enum EvictionReason {
-    /** The segment has been evicted in the latest playlist update. */
-    Expired = 'expired'
 }
 
 
@@ -125,8 +119,8 @@ export class HlsFetcherObject {
     /**
      * Triggers if the segment data is no longer retrievable.
      *
-     * The trigger reason will be `'expired'` to signal that the segment
-     * is no longer part of the playlist, or an Error.
+     * The trigger reason will be a `TimeoutError` to signal that the segment
+     * is no longer part of the playlist.
      */
     get evicted(): AbortSignal {
 
@@ -389,13 +383,13 @@ export class HlsSegmentFetcher {
             // Wait one target duration before evicting
 
             wait(waitTime, { signal: this.#ac.signal })
-                .then(() => ac.abort(EvictionReason.Expired), (err) => ac.abort(err));
+                .then(() => ac.abort(new TimeoutError('Segment was evicted from playlist')), (err) => ac.abort(err));
 
             track.active.delete(token);
         }
     }
 
-    #evictAll(reason: EvictionReason | Error) {
+    #evictAll(reason: Error) {
 
         for (const ac of this.#track.active.values()) {
             ac.abort(reason);

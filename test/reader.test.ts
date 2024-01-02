@@ -235,7 +235,7 @@ describe('HlsSegmentReadable()', () => {
 
             for await (const obj of r) {
                 expect(obj).to.exist();
-                await Hoek.wait(20);
+                await wait(20);
                 buffered.push(r._readableState.buffer.length);
             }
 
