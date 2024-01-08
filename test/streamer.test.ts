@@ -10,7 +10,7 @@ import { provisionServer, provisionLiveServer, genIndex, ServerState, Unprotecte
 import { createSimpleReader, HlsFetcherObject, HlsSegmentReadable, HlsSegmentStreamer, HlsStreamerObject } from '../lib/index.js';
 import { HlsSegmentStreamerOptions } from '../lib/segment-streamer.js';
 import { HlsPlaylistFetcher, HlsPlaylistFetcherOptions } from 'hls-playlist-reader/fetcher';
-import { ContentFetcher, Deferred, wait } from 'hls-playlist-reader/helpers';
+import { assert, ContentFetcher, Deferred, wait } from 'hls-playlist-reader/helpers';
 import { HlsSegmentFetcher, HlsSegmentFetcherOptions } from '../lib/segment-fetcher.js';
 
 
@@ -48,13 +48,18 @@ const devNull = async (stream?: ReadableStream | Readable): Promise<number> => {
                     consumed += c.byteLength;
                 },
                 close: () => resolve(consumed)
-            })).catch(reject);
+            })).catch((err) => reject(Object.assign(new Error('Read error', { cause: err }), { consumed })));
         });
     }
     else if (stream instanceof Readable) {
         let consumed = 0;
-        for await (const chunk of stream) {
-            consumed += chunk.byteLength;
+        try {
+            for await (const chunk of stream) {
+                consumed += chunk.byteLength;
+            }
+        }
+        catch (err) {
+            throw Object.assign(new Error('Read error', { cause: err }), { consumed });
         }
 
         return consumed;
@@ -397,6 +402,60 @@ describe('HlsSegmentStreamer()', () => {
             }
 
             expect(buffered).to.equal([3, 3, 3, 2, 1, 0]);
+        });
+
+        it('buffers errors on stream transfers while in internal queue', async () => {
+
+            const r = createSimpleReader(`${server.info.uri}/simple/long.m3u8`, { highWaterMark: 3 });
+            const buffered = [];
+            const fails = [];
+
+            server.onRequest = (request) => {
+
+                if (request.url.pathname === '/simple/500-00001.ts') {
+                    const newUrl = new URL(request.url);
+                    newUrl.pathname = '/error-data/500-00001.ts';
+                    request.setUrl(newUrl);
+                }
+            };
+
+            try {
+                let reads = 0;
+                for await (const obj of r) {
+                    ++reads;
+                    expect(obj).to.exist();
+                    let emittedError: Error | undefined;
+                    if (obj.stream instanceof Readable) {
+                        // eslint-disable-next-line no-return-assign
+                        obj.stream.once('error', (err) => emittedError = err);
+                    }
+
+                    try {
+                        await devNull(obj.stream);
+                    }
+                    catch (err) {
+                        assert(err instanceof Error);
+
+                        expect(emittedError).to.exist();
+                        expect(err.cause).to.equal(emittedError);
+                        expect((err as any as { consumed?: number }).consumed).to.equal(500);
+
+                        fails.push(obj);
+                    }
+
+                    await wait(20);
+
+                    buffered.push(r.source.transforms - reads);
+                }
+
+                expect(buffered).to.equal([3, 3, 3, 2, 1, 0]);
+                expect(fails).to.have.length(1);
+                expect(fails[0].segment.msn).to.equal(1);
+                await expect(fails[0].fetched).to.reject(Error, 'socket hang up');
+            }
+            finally {
+                server.onRequest = undefined;
+            }
         });
 
         it('cancel() also aborts active streams when withData is set', async () => {
