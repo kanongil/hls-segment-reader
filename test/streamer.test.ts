@@ -119,23 +119,25 @@ describe('HlsSegmentStreamer()', () => {
 
     it('emits error on unknown segment mime type', async () => {
 
-        await expect((async () => {
+        const err1 = await expect((async () => {
 
             const r = createSimpleReader(`${server.info.uri}/simple/badtype.m3u8`, { withData: false });
 
             for await (const obj of r) {
                 expect(obj).to.exist();
             }
-        })()).to.reject(Error, /Unsupported segment MIME type/);
+        })()).to.reject(Error, 'Fatal processing error');
+        expect((err1 as any).cause).to.be.an.error(Error, /Unsupported segment MIME type/);
 
-        await expect((async () => {
+        const err2 = await expect((async () => {
 
             const r = createSimpleReader(`${server.info.uri}/simple/badtype-data.m3u8`, { withData: true });
 
             for await (const obj of r) {
                 expect(obj).to.exist();
             }
-        })()).to.reject(Error, /Unsupported segment MIME type/);
+        })()).to.reject(Error, 'Fatal processing error');
+        expect((err2 as any).cause).to.be.an.error(Error, /Unsupported segment MIME type/);
     });
 
     describe('Using FakeFetcher manual ingestion', () => {

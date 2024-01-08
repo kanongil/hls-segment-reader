@@ -163,9 +163,11 @@ export class HlsSegmentDataSource implements Transformer<HlsFetcherObject, HlsSt
             await this._process(chunk, controller);
         }
         catch (err: any) {
-            if (!internals.isAbortedError(err)) {
+            if (internals.isAbortedError(err)) {
                 throw err;
             }
+
+            throw new Error('Fatal processing error', { cause: err });        // Usually caused by failure to start stream fetch
         }
     }
 
