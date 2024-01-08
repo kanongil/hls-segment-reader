@@ -76,7 +76,17 @@ export class HlsStreamerObject {
         return this.segment.entry.map;
     }
 
-    constructor(fetchResult: IFetchResult<StreamTypes>, type: 'segment' | 'map', details: Readonly<HlsFetcherObject>) {
+    /**
+     * Resolves once the `stream` has been fetched from the remote, or rejects if the transfer fails, is timed out, or was aborted.
+     *
+     * Note that this is resolved independent of the consumption of the `stream`.
+     */
+    get fetched(): Promise<void> {
+
+        return this.#fetchResult.completed;
+    }
+
+    constructor(fetchResult: IFetchResult<StreamTypes>, type: HlsStreamerObject['type'], details: Readonly<HlsFetcherObject>) {
 
         this.#fetchResult = fetchResult;
         this.type = type;

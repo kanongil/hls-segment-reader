@@ -1,4 +1,4 @@
-import Fs from 'fs';
+import Fs from 'fs/promises';
 import { Readable } from 'stream';
 
 import { expect } from '@hapi/code';
@@ -19,7 +19,7 @@ export interface UnprotectedPlaylistFetcher {
 
 export const provisionServer = async () => {
 
-    const server = new Hapi.Server({
+    const server: Hapi.Server & { onRequest?: (request: Hapi.Request) => void } = new Hapi.Server({
         host: '127.0.0.1',
         routes: { files: { relativeTo: new URL('fixtures', import.meta.url).pathname } }
     });
@@ -33,26 +33,40 @@ export const provisionServer = async () => {
         return 200;
     };
 
-    const slowServe: Hapi.Lifecycle.Method = (request, h) => {
+    const slowServe: Hapi.Lifecycle.Method = async (request, h) => {
 
         const slowStream = new Readable();
         slowStream._read = ignore;
 
         const url = new URL(`fixtures/${request.params.path}`, import.meta.url);
-        const buffer = Fs.readFileSync(url);
-        slowStream.push(buffer.slice(0, 5000));
+        const buffer = await Fs.readFile(url);
+        slowStream.push(buffer.subarray(0, 5000));
         setTimeout(() => {
 
-            slowStream.push(buffer.slice(5000));
+            slowStream.push(buffer.subarray(5000));
             slowStream.push(null);
         }, 250);
 
         return h.response(slowStream).type('video/mp2t').header('content-length', buffer.byteLength.toString());
     };
 
+    const errorServe: Hapi.Lifecycle.Method = async (request, h) => {
+
+        const errorStream = new Readable();
+        errorStream._read = ignore;
+
+        const url = new URL(`fixtures/${request.params.path}`, import.meta.url);
+        const buffer = await Fs.readFile(url);
+        errorStream.push(buffer.subarray(0, 500));
+        setTimeout(() => errorStream.destroy(new Error('transfer error')), 10);
+
+        return h.response(errorStream).type('video/mp2t').header('content-length', buffer.byteLength.toString());
+    };
+
     server.route({ method: 'GET', path: '/simple/{path*}', handler: { directory: { path: '.' } } });
     server.route({ method: 'GET', path: '/slow/{path*}', handler: { directory: { path: '.' } }, options: { pre: [{ method: delay, assign: 'delay' }] } });
     server.route({ method: 'GET', path: '/slow-data/{path*}', handler: slowServe });
+    server.route({ method: 'GET', path: '/error-data/{path*}', handler: errorServe });
     server.route({
         method: 'GET', path: '/error', handler(request, h) {
 
@@ -62,8 +76,8 @@ export const provisionServer = async () => {
 
     server.ext('onRequest', (request, h) => {
 
-        if ((server as any).onRequest) {
-            (server as any).onRequest(request);
+        if (server.onRequest) {
+            server.onRequest(request);
         }
 
         return h.continue;

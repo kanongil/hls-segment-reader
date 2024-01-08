@@ -53,6 +53,7 @@ export class PartStreamImpl<T extends object> {
     #meta = Object.assign(new Deferred<FetchResult['meta']>(true), { ready: false });
     #fetchTimer?: ReturnType<typeof setTimeout>;
     #hint?: Hint;
+    #completed = new Deferred<void>(true);
     //#blocking = Symbol('PartStream');   // We cannot use blocking since the HTTP stack does not handle pipelined requests
 
     constructor(fetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>, feedFn: FeedFn<T>, { baseUrl, signal, tracker }: PartStreamOptions) {
@@ -81,12 +82,16 @@ export class PartStreamImpl<T extends object> {
 
             this.#meta.reject(err);
             this.#ac.abort(err);
+
+            this.#completed.reject(err);
         }
 
         clearTimeout(this.#fetchTimer);
         this.#signal.signal.removeEventListener('abort', this.#signal.handler);
         this.#fetches = [];
         this.#hint = undefined;
+
+        this.#completed.resolve();
     }
 
     addParts(parts?: Part[], hint?: PreloadHints, final = false) {
@@ -214,6 +219,11 @@ export class PartStreamImpl<T extends object> {
         return this.#meta.promise;
     }
 
+    get completed(): Promise<void> {
+
+        return this.#completed.promise;
+    }
+
     _mergeParts(parts: Part[], { final }: { final: boolean }): Part[] {
 
         // Attempt to claim active hint
@@ -322,6 +332,7 @@ type Constructor = new (...args: any[]) => IPartStream;
 
 export interface IPartStream {
     readonly meta: Promise<FetchResult['meta']>;
+    readonly completed: Promise<void>;
     append(parts?: PartData[], hint?: PreloadHints, final?: boolean): void;
     abandon(): void;
 }
@@ -342,6 +353,11 @@ export const partStreamSetup = function <T extends object, TBase extends Constru
                 ...meta,
                 size: -1     // Size only represents the first part, not entire segment which is unknown
             }));
+        }
+
+        get completed(): Promise<void> {
+
+            return this.#impl.completed;
         }
 
         constructor(...args: any[]) {

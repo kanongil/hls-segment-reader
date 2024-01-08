@@ -669,7 +669,7 @@ describe('HlsSegmentReadable()', () => {
 
                         const { error } = state;
                         if (error) {
-                            state.error!++;
+                            state.error = (state.error ?? 0) + 1;
                             switch (error) {
                                 case 1:
                                     throw notFound();
