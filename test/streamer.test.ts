@@ -272,11 +272,11 @@ describe('HlsSegmentStreamer()', () => {
                     uri: 'data:video/mp2t,TS',
                     duration: 2
                 });
-            });
 
-            fetcher.feed(new HlsFetcherObject(1, new IMediaSegment({
-                parts: [new AttrList(), new AttrList()]
-            }), opts));
+                fetcher.feed(new HlsFetcherObject(1, new IMediaSegment({
+                    parts: [new AttrList(), new AttrList()]
+                }), opts));
+            });
 
             const promise = nextValue(iter);
             expect(await Promise.race([segment.closed(), promise])).to.equal(true);

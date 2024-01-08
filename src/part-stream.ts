@@ -48,12 +48,11 @@ export class PartStreamImpl<T extends object> {
 
     /** Used to internally cancel all active fetches. */
     #ac = new AbortController();
-    #queuedParts: Part[] = [];
     #fetches: ExtendedFetch[] = [];
     #meta = Object.assign(new Deferred<FetchResult['meta']>(true), { ready: false });
-    #fetchTimer?: ReturnType<typeof setTimeout>;
     #hint?: Hint;
     #completed = new Deferred<void>(true);
+    #feeding = false;
     //#blocking = Symbol('PartStream');   // We cannot use blocking since the HTTP stack does not handle pipelined requests
 
     constructor(fetcher: InstanceType<typeof ContentFetcher | typeof ContentFetcherWeb>, feedFn: FeedFn<T>, { baseUrl, signal, tracker }: PartStreamOptions) {
@@ -86,7 +85,6 @@ export class PartStreamImpl<T extends object> {
             this.#completed.reject(err);
         }
 
-        clearTimeout(this.#fetchTimer);
         this.#signal.signal.removeEventListener('abort', this.#signal.handler);
         this.#fetches = [];
         this.#hint = undefined;
@@ -94,34 +92,25 @@ export class PartStreamImpl<T extends object> {
         this.#completed.resolve();
     }
 
+    /** Add parts to internal queue */
     addParts(parts?: Part[], hint?: PreloadHints, final = false) {
 
         assert(!parts || Array.isArray(parts), 'Parts must be an array');
 
-        if (parts) {
-            this.#queuedParts.push(...parts);
-        }
+        this.#ac.signal.throwIfAborted();
 
-        const process = (): void => {
+        const merged = this._mergeParts(parts ?? [], { final });
 
-            const merged = this._mergeParts(this.#queuedParts, { final });
+        // Initiate fetches
 
-            // Initiate fetches
+        const fetches = merged
+            .map((part) => this._fetchPart(part));
+        this._fetchHints(final ? undefined : hint);
 
-            const fetches = merged
-                .map((part) => this._fetchPart(part));
-            this._fetchHints(final ? undefined : hint);
+        // Feed to internal queue and start background feed loop (if not already running)
 
-            // Start internal background feed loop (if not already running)
-
-            this._feedFetches(fetches)
-                .catch((err) => this.#finalize(err));     // #finalize() on fetch errors
-
-            this.#queuedParts = [];
-        };
-
-        clearTimeout(this.#fetchTimer);
-        this.#fetchTimer = setTimeout(process, 0);
+        this._feedFetches(fetches)
+            .catch((err) => this.#finalize(err));     // #finalize() on fetch / feed errors
     }
 
     cancel(reason?: Error) {
@@ -161,15 +150,24 @@ export class PartStreamImpl<T extends object> {
 
     async _feedFetches(fetches: ExtendedFetch[]) {
 
-        const active = this.#fetches.length > 0;
         this.#fetches.push(...fetches);
-
         for (const fetch of fetches) {
             fetch.catch(() => undefined);      // No unhandled promise rejection errors
         }
 
-        if (!active) {
-            for (const fetch of this.#fetches) {
+        if (!this.#feeding) {
+            await this.#feedAllFetches();
+        }
+    }
+
+    /** Iterate over the fetches, and pass them to feedFn() in order, as they are ready. */
+    async #feedAllFetches() {
+
+        this.#feeding = true;
+
+        try {
+            let fetch: ExtendedFetch | undefined;
+            while (fetch = this.#fetches.shift()) {
                 let res: Awaited<ExtendedFetch>;
                 try {
                     res = await fetch;
@@ -177,14 +175,36 @@ export class PartStreamImpl<T extends object> {
                 catch (err) {
                     // TODO: report problem!?!?
 
-                    // Cancel all pending fetches to ensure priority for retry request
+                    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+                        throw err;
+                    }
 
-                    this.#ac.abort(err);
+                    // Cancel all pending & hint fetches to ensure priority for retry request
+
+                    this.#ac.abort(new Error('Pre-empted by retry'));
                     this.#ac = new AbortController();
+
+                    /*const pending = this.#fetches.slice(this.#fetches.indexOf(fetch));
+                    for (const item of pending) {
+                        // TODO: only cancel if not already completed??
+                        item.abort(new Error('Pre-empted by retry'));
+                    }
+
+                    this.#hint?.fetch.abort(new Error('Pre-empted by retry'));*/
 
                     // Immediately retry once
 
-                    res = await this._fetchPart(fetch.part);
+                    fetch = this._fetchPart(fetch.part);
+
+                    // Re-queue remaining parts & hint
+
+                    const parts = this.#fetches.map((entry) => entry.part);
+                    const hint = this.#hint ? { part: this.#hint.part } : undefined;
+                    const final = !!arrayAt(this.#fetches, -1)?.part.final;
+                    this.#fetches = [];
+                    this.addParts(parts, hint, final);
+
+                    res = await fetch;
                 }
 
                 const { stream, meta } = res;
@@ -209,8 +229,9 @@ export class PartStreamImpl<T extends object> {
                     this.#finalize();
                 }
             }
-
-            this.#fetches = [];
+        }
+        finally {
+            this.#feeding = false;
         }
     }
 
@@ -224,6 +245,7 @@ export class PartStreamImpl<T extends object> {
         return this.#completed.promise;
     }
 
+    /** Claim hinted fetch and optimize range requests */
     _mergeParts(parts: Part[], { final }: { final: boolean }): Part[] {
 
         // Attempt to claim active hint
